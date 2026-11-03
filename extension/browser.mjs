@@ -1,4 +1,4 @@
-import { BrowserCore, SCHOOL, validatePageUrl } from '../app/browser-core.mjs';
+import { BrowserCore, loginUrl, validatePageUrl } from '../app/browser-core.mjs';
 
 // Chrome 118+ keeps an MV3 service worker alive while a debugger session is active.
 // All debug targets are tabs created by this extension; login tabs remain ordinary tabs.
@@ -92,8 +92,9 @@ export class ExtensionBrowser extends BrowserCore {
     this.background = true;
     this.studentIds.clear();
     try {
-      this.dataPage = await this.newPage(`${SCHOOL}/pro/`);
-      await this.waitForPage(this.dataPage, SCHOOL);
+      const url = loginUrl(this.platform);
+      this.dataPage = await this.newPage(url);
+      await this.waitForPage(this.dataPage, new URL(url).origin);
       return 'Chrome 插件';
     } catch (error) { await this.close(); throw error; }
   }

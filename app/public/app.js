@@ -27,7 +27,10 @@ function taskState(task) {
   if (item && !['skipped','stopped'].includes(item.status)) return item.status === 'playing' && data.queue.status==='paused' ? 'paused' : item.status;
   return task.status;
 }
-function selectable(task) { return task.type===0 && !task.expired && !['completed','unknown','queued','loading','playing','verifying','waiting_focus','needs_attention'].includes(taskState(task)); }
+function selectable(task) {
+  if(activeQueue()&&data.queue.items.some(i=>i.id===task.id))return false;
+  return task.type===0 && !task.expired && !['completed','unknown','queued','loading','playing','paused','verifying','waiting_focus','needs_attention'].includes(taskState(task));
+}
 function visibleTasks() {
   const courses = selectedCourse ? data.courses.filter(c=>c.id===selectedCourse) : coursesInView();
   return courses.flatMap(course=>course.tasks.map(task=>({...task,courseName:course.name,classroomName:course.classroomName}))).filter(task=>{
@@ -55,14 +58,12 @@ function render() {
   $('connectionChip').innerHTML=`<i></i>${connected?'浏览器已连接':'浏览器未连接'}`;
   $('connectionMessage').textContent=data.syncing?data.syncMessage:data.connection.message;
   $('connectButton').textContent=connected?'重新连接':'连接浏览器';
-  $('connectButton').disabled=busy||activeQueue()||data.syncing;
-  $('openBrowser').disabled=busy||activeQueue()||data.syncing;
+  $('connectButton').disabled=busy||activeQueue()||data.syncing||data.connecting;
+  $('openBrowser').disabled=busy||activeQueue()||data.syncing||data.connecting;
   $('platformSelect').value=data.platform||'school';
-  $('platformSelect').disabled=busy||activeQueue()||data.syncing;
-  $('platformNote').hidden=data.platform!=='official';
-  $('openSchoolLogin').disabled=busy||activeQueue()||data.syncing;
+  $('platformSelect').disabled=busy||activeQueue()||data.syncing||data.connecting;
   $('openBrowser').textContent=data.platform==='official'?'打开雨课堂版登录页':'打开校园版登录页';
-  $('syncButton').disabled=busy||!connected||data.syncing;
+  $('syncButton').disabled=busy||!connected||data.syncing||data.connecting;
   $('syncButton').textContent=data.syncing?'↻ 正在同步…':'↻ 同步课程';
   $('cacheBanner').hidden=!data.cacheOnly;
   const courses=coursesInView();
@@ -81,16 +82,22 @@ function render() {
   $('refreshCourse').disabled=busy||!connected;
   if(course?.error)$('courseSubtitle').textContent+=` · ${course.error}`;
   const visible=visibleTasks();
-  $('taskRows').innerHTML=visible.map(t=>`<tr><td><input type="checkbox" data-task="${t.id}" aria-label="选择 ${escape(t.name)}" ${selected.has(t.id)?'checked':''} ${selectable(t)?'':'disabled'}></td><td><div class="task-title">${escape(t.name==='作业'&&t.section?t.section+' · 作业':t.name)}</div><div class="task-meta"><span class="task-type ${[5,6].includes(t.type)?'assignment':''}">${typeLabels[t.type]||'任务'}</span>${escape(t.courseName)}${t.name==='作业'&&!t.section?' · '+t.leafId:''}</div></td><td class="deadline ${t.expired?'expired':''}">${escape(formatDate(t))}</td><td>${badge(taskState(t),t.expired)}</td><td><button class="open-task" data-open="${t.id}" aria-label="打开 ${escape(t.name)}" title="在雨课堂中打开" ${connected?'':'disabled'}>↗</button></td></tr>`).join('');
+  $('taskRows').innerHTML=visible.map(t=>`<tr><td><input type="checkbox" data-task="${t.id}" aria-label="选择 ${escape(t.name)}" ${selected.has(t.id)?'checked':''} ${!busy&&selectable(t)?'':'disabled'}></td><td><div class="task-title">${escape(t.name==='作业'&&t.section?t.section+' · 作业':t.name)}</div><div class="task-meta"><span class="task-type ${[5,6].includes(t.type)?'assignment':''}">${typeLabels[t.type]||'任务'}</span>${escape(t.courseName)}${t.name==='作业'&&!t.section?' · '+t.leafId:''}</div></td><td class="deadline ${t.expired?'expired':''}">${escape(formatDate(t))}</td><td>${badge(taskState(t),t.expired)}</td><td><button class="open-task" data-open="${t.id}" aria-label="打开 ${escape(t.name)}" title="在雨课堂中打开" ${connected?'':'disabled'}>↗</button></td></tr>`).join('');
   $('emptyState').hidden=visible.length>0;
   $('taskCount').textContent=`${visible.length} 项任务`;
   $('lastSync').textContent=data.lastSync?`最近同步 ${new Date(data.lastSync).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}`:'尚未同步';
   const selectableTasks=visible.filter(selectable);
   $('selectAll').checked=selectableTasks.length>0&&selectableTasks.every(t=>selected.has(t.id));
   $('selectAll').indeterminate=selectableTasks.some(t=>selected.has(t.id))&&!$('selectAll').checked;
+  $('selectAll').disabled=busy;
+  $('selectAllVideos').disabled=busy;
   $('selectionCount').textContent=selected.size?`已选择 ${selected.size} 个视频`:'未选择';
   document.querySelectorAll('[data-filter]').forEach(b=>b.classList.toggle('selected',b.dataset.filter===filter));
   const queue=data.queue,active=queue.items.find(i=>i.id===queue.activeId),hasQueue=queue.items.length>0;
+  const playingCount=queue.items.filter(i=>i.status==='playing'&&queue.status!=='paused').length;
+  const waitingCount=queue.items.filter(i=>i.status==='queued').length;
+  const completedCount=queue.items.filter(i=>i.status==='completed').length;
+  $('queueSummary').textContent=hasQueue?`播放 ${playingCount} / 上限 ${queue.concurrency} · 排队 ${waitingCount} · 完成 ${completedCount} / ${queue.items.length}`:'按并发上限播放，其余视频自动排队';
   $('queueBadge').textContent=queueLabels[queue.status]||queue.status;
   $('queueBadge').className=`badge ${['needs_attention','waiting_focus'].includes(queue.status)?'warning':queue.status==='running'?'playing':'neutral'}`;
   $('queueIntro').hidden=!!active||hasQueue;
@@ -109,9 +116,8 @@ function render() {
     const live=(queue.activeIds||[queue.activeId]).includes(i.id);
     return `<li class="${live?'active':''}"><span class="index">${String(index+1).padStart(2,'0')}</span><div>${escape(i.name)}<small>${escape(i.courseName)}</small>${i.duration?`<small>${time(i.position)} / ${time(i.duration)} · ${i.speed}×${i.muted?' · 静音':''}</small><small>服务器覆盖率 ${i.coverage===null?'等待读取':(i.coverage*100).toFixed(1)+'%'}</small>`:''}${i.message&&['needs_attention','failed'].includes(i.status)?`<small class="task-error">${escape(i.message)}</small>`:''}${live?`<div class="task-actions"><button class="text-button" data-focus="${i.id}">打开</button>${['needs_attention','waiting_focus'].includes(i.status)?`<button class="text-button" data-resume="${i.id}">继续</button>`:''}<button class="text-button" data-skip="${i.id}">跳过</button></div>`:''}</div>${badge(live&&queue.status==='paused'?'paused':i.status,false)}</li>`;
   }).join('');
-  $('startQueue').hidden=activeQueue();
-  $('startQueue').disabled=busy||!connected||data.cacheOnly||!selected.size||data.syncing;
-  $('startQueue').textContent=selected.size?`▶ 开始播放 ${selected.size} 个视频`:'▶ 开始播放所选视频';
+  $('startQueue').disabled=busy||!connected||data.cacheOnly||!selected.size||data.syncing||queue.status==='stopping';
+  $('startQueue').textContent=selected.size?`${activeQueue()?'＋ 追加':'▶ 加入队列并开始'} ${selected.size} 个视频`:'▶ 多选并加入队列';
   $('queueControls').hidden=!activeQueue();
   $('pauseQueue').hidden=!['running','waiting_focus'].includes(queue.status);
   $('resumeQueue').hidden=!['paused','needs_attention'].includes(queue.status);
@@ -135,13 +141,13 @@ $('taskRows').onchange=e=>{const id=e.target.dataset.task;if(id){e.target.checke
 $('taskRows').onclick=e=>{const b=e.target.closest('[data-open]');if(b)action(()=>api('/api/task/open',{id:b.dataset.open}));};
 $('selectAll').onchange=e=>{visibleTasks().filter(selectable).forEach(t=>e.target.checked?selected.add(t.id):selected.delete(t.id));render();};
 $('clearSelection').onclick=()=>{selected.clear();render();};
-$('platformSelect').onchange=()=>{const platform=$('platformSelect').value;action(async()=>{data=await api('/api/platform',{platform});toast(`已选择${platform==='official'?'雨课堂版':'校园版'}，登录页、视频和作业将使用此版本。`);});};
+$('selectAllVideos').onclick=()=>{for(const course of coursesInView())for(const task of course.tasks)if(selectable(task))selected.add(task.id);render();};
+$('platformSelect').onchange=()=>{const platform=$('platformSelect').value;action(async()=>{data=await api('/api/platform',{platform});selected.clear();toast(`已选择${platform==='official'?'雨课堂版':'校园版'}，请重新连接浏览器。`);});};
 $('openBrowser').onclick=()=>action(async()=>{const result=await api('/api/browser/open');$('endpoint').value=result.endpoint;toast('已打开雨课堂。请手动登录，再点击连接浏览器。');});
-$('openSchoolLogin').onclick=()=>action(async()=>{const result=await api('/api/browser/open',{platform:'school'});$('endpoint').value=result.endpoint;toast('已打开校园版，请手动登录后返回学习台。');});
 $('connectButton').onclick=()=>action(async()=>{await api('/api/connect',{endpoint:$('endpoint').value});await api('/api/sync');toast('课程与待办已同步');});
 $('syncButton').onclick=()=>action(()=>api('/api/sync'));
 $('refreshCourse').onclick=()=>action(()=>api('/api/course/refresh',{id:selectedCourse}));
-$('startQueue').onclick=()=>action(async()=>{const ids=[...selected];await api('/api/queue/start',{ids,speed:Number($('speedSelect').value),mode:$('playbackMode').value,concurrency:Number($('concurrencySelect').value),muted:$('muteVideos').checked});selected.clear();});
+$('startQueue').onclick=()=>action(async()=>{const ids=[...selected];data=await api('/api/queue/enqueue',{ids,speed:Number($('speedSelect').value),mode:$('playbackMode').value,concurrency:Number($('concurrencySelect').value),muted:$('muteVideos').checked});selected.clear();toast(`已加入 ${data.added} 个视频，按并发上限依次播放。`);});
 for(const [id,verb] of [['pauseQueue','pause'],['resumeQueue','resume'],['stopQueue','stop'],['skipVideo','skip']])$(id).onclick=()=>action(()=>api('/api/queue/'+verb));
 $('focusPlayer').onclick=()=>action(()=>api('/api/player/focus'));
 $('stopService').onclick=()=>action(async()=>{await api('/api/service/stop');if(!extensionMode){events.close();$('connectionChip').innerHTML='<i></i>工具已退出';}toast(extensionMode?'已断开连接，工具创建的视频标签已关闭。':'服务已停止，工具创建的视频已暂停。');});

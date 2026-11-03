@@ -53,7 +53,7 @@ function fakeChrome(stored = {}) {
             URL, AbortSignal, location:{origin:new URL(tab.url).origin},
             document:{readyState:'complete', querySelector:()=>null},
             fetch:async(route, options) => {
-              calls.push(['fetch', route, options]);
+              calls.push(['fetch', route, options, new URL(tab.url).origin]);
               const response = api.responses.get(route);
               if (!response) throw new Error('No response fixture: '+route);
               return {ok:true,status:200,json:async()=>structuredClone(response)};
@@ -177,26 +177,63 @@ test('bundled worker connects, syncs course todos, and disconnects without a loc
   const disconnected=await f.action('/api/service/stop');assert.equal(disconnected.connection.connected,false);
   assert.deepEqual([...f.tabs.keys()],[loginId]);assert.equal(f.attached.size,0);
 });
-test('platform choice persists, opens official assignments, and keeps catalog requests on school origin',async()=>{
-  const task={id:'1:5',leafId:5,type:6,name:'作业',url:'https://tsinghua.yuketang.cn/ai-workspace/lms-graph/1/exercise/5?node_id=7&fromProIframe=1&isyth=1'};
-  const f=await workerFixture({courses:[{id:1,sign:'sign',tasks:[task]}]});
+test('platform choice controls the connection and API origin and invalidates old connections',async()=>{
+  const f=await workerFixture();
   await assert.rejects(f.action('/api/platform',{platform:'other'}),/校园版/);
   const chosen=await f.action('/api/platform',{platform:'official'});
   assert.equal(chosen.platform,'official');assert.equal(chosen.maxConcurrency,16);assert.equal(f.local.platform,'official');
   await f.action('/api/browser/open');
   assert.equal([...f.tabs.values()][0].url,'https://pro.yuketang.cn/v2/web');
-  await f.action('/api/browser/open',{platform:'school'});
-  assert.equal([...f.tabs.values()][1].url,'https://tsinghua.yuketang.cn/pro/');
   await f.action('/api/connect');
   const dataTab=[...f.tabs.values()].find(t=>f.attached.has(t.id));
-  assert.equal(new URL(dataTab.url).origin,'https://tsinghua.yuketang.cn');
+  assert.equal(new URL(dataTab.url).origin,'https://pro.yuketang.cn');
+  f.api.responses.set('/mooc-api/v1/lms/user/user-courses/?status=1&page=1&no_page=1&no_term=true&uv_id=2598',{data:{count:0,product_list:[]}});
+  const synced=await f.action('/api/sync');assert.equal(synced.cacheOnly,false);
+  assert.equal(f.calls.find(c=>c[0]==='fetch')[3],'https://pro.yuketang.cn');
+  const changed=await f.action('/api/platform',{platform:'school'});
+  assert.equal(changed.connection.connected,false);assert.equal(changed.cacheOnly,true);assert.equal(f.tabs.has(dataTab.id),false);
+  await f.action('/api/connect');
+  assert.equal(new URL([...f.tabs.values()].find(t=>f.attached.has(t.id)).url).origin,'https://tsinghua.yuketang.cn');
+  await f.action('/api/service/stop');
+  const reloaded=await workerFixture(f.local);
+  assert.equal((await reloaded.action('/api/state')).platform,'school');
+});
+test('bundled worker accepts multi-select enqueue and append while retaining its active limit',async t=>{
+  const f=await workerFixture();t.after(()=>f.action('/api/service/stop'));
+  f.api.responses.set('/mooc-api/v1/lms/user/user-courses/?status=1&page=1&no_page=1&no_term=true&uv_id=2598',{data:{count:1,product_list:[{classroom_id:1,course_id:2,sku_id:3,course_sign:'sign',course_name:'测试课程'}]}});
+  f.api.responses.set('/c27/online_courseware/course/classroom/1/3/study_stat/?term=latest&uv_id=2598',{data:{study_progress:0}});
+  f.api.responses.set('/c27/online_courseware/course/classroom/1/3/todo_list/?client_type=web&term=latest&uv_id=2598',{data:{count:{total:3},result:[4,5,6].map(leaf_id=>({leaf_id,name:'视频'+leaf_id,type:0}))}});
+  f.api.responses.set('/c27/api/v1/platfrom/watermark?uv_id=2598&classroom_id=1',{data:{video_multiple_play_disabled:false}});
+  for(const id of [4,5,6]){
+    f.api.responses.set(`/mooc-api/v1/lms/learn/leaf_info/1/${id}/`,{data:{user_id:7}});
+    f.api.responses.set(`/video-log/get_video_watch_progress/?cid=2&user_id=7&classroom_id=1&video_type=video&vtype=rate&video_id=${id}&snapshot=1&no_loading=true`,{data:{[id]:{completed:0,rate:0}}});
+  }
+  await f.action('/api/connect');await f.action('/api/sync');
+  const initial=await f.action('/api/queue/enqueue',{ids:['1:4'],speed:1.5,concurrency:2,muted:true});
+  assert.equal(initial.added,1);
+  const appended=await f.action('/api/queue/enqueue',{ids:['1:4','1:5','1:6'],speed:2,concurrency:16,muted:false});
+  assert.equal(appended.added,2);assert.equal(appended.queue.items.length,3);
+  assert.equal(appended.queue.concurrency,2);assert.equal(appended.queue.muted,true);
+  assert.ok(appended.queue.activeIds.length<=2);
+  assert.equal((await f.action('/api/queue/enqueue',{ids:['1:6']})).added,0);
+});
+test('school-authenticated tabs are not used for official platform requests',async()=>{
+  const f=await workerFixture({platform:'official'});
+  await f.action('/api/connect');
+  const tab=[...f.tabs.values()].find(t=>f.attached.has(t.id));
+  tab.url='https://tsinghua.yuketang.cn/pro/';
+  await assert.rejects(f.action('/api/sync'),/所选版本/);
+  assert.equal(f.calls.filter(c=>c[0]==='fetch').length,0);
+  await f.action('/api/service/stop');
+});
+test('restored official tasks can be opened without implicitly opening a school page',async()=>{
+  const task={id:'1:5',type:6,url:'https://tsinghua.yuketang.cn/ai-workspace/lms-graph/1/exercise/5?node_id=7'};
+  const f=await workerFixture({platform:'official',courses:[{id:1,sign:'sign',tasks:[task]}]});
   await f.action('/api/task/open',{id:task.id});
   const opened=[...f.tabs.values()].at(-1);
   assert.equal(new URL(opened.url).origin,'https://pro.yuketang.cn');assert.equal(new URL(opened.url).pathname,'/ai-workspace/lms-graph/1/exercise/5');
   assert.equal(new URL(opened.url).searchParams.get('node_id'),'7');
-  await f.action('/api/service/stop');
-  const reloaded=await workerFixture(f.local);
-  assert.equal((await reloaded.action('/api/state')).platform,'official');
+  assert.equal(f.tabs.size,1);
 });
 test('restored sixteen-video and mute preferences survive worker restart without autoplay',async()=>{
   const plan={ids:['1:4'],mode:'background',concurrency:16,speed:2,muted:true};

@@ -7,13 +7,13 @@ const bridge = new ExtensionBrowser();
 const clients = new Set();
 let courses = [], syncing = false, syncMessage = '', lastSync = null, cacheOnly = true;
 let restoredPlan = null, saveChain = Promise.resolve(), exiting = false, connecting = false;
-let connection = {connected:false, endpoint:'', browser:'Chrome 插件', message:'在 Chrome 中手动登录清华雨课堂，然后点击连接', loginRequired:false};
+let connection = {connected:false, endpoint:'', browser:'Chrome 插件', message:'在 Chrome 中手动登录所选版本，然后点击连接', loginRequired:false};
 function findTask(id) {
   for (const course of courses) { const task = course.tasks.find(t => t.id === id); if (task) return {course, task}; }
   return null;
 }
 function state() {
-  return {connection:{...connection, connected:bridge.connected}, platform:bridge.platform, maxConcurrency:MAX_CONCURRENCY, courses, syncing, syncMessage, lastSync, cacheOnly, queue:queue.state, supportedSpeeds:SPEEDS, restoredPlan};
+  return {connection:{...connection, connected:bridge.connected}, platform:bridge.platform, maxConcurrency:MAX_CONCURRENCY, courses, syncing, connecting, syncMessage, lastSync, cacheOnly, queue:queue.state, supportedSpeeds:SPEEDS, restoredPlan};
 }
 function broadcast() {
   const value = state();
@@ -106,7 +106,7 @@ async function syncAll() {
     }
     await Promise.all([worker(), worker()]);
     lastSync = new Date().toISOString(); cacheOnly = false;
-    connection.loginRequired = false; connection.message = '已连接清华雨课堂';
+    connection.loginRequired = false; connection.message = `已连接${PLATFORMS[bridge.platform].name}`;
     syncMessage = failed ? `${failed} 门课程未同步成功，可单独重试` : '课程与待办已更新';
     await save({courses, lastSync});
   } catch (error) { connection.loginRequired = true; connection.message = error.message; throw error; }
@@ -116,10 +116,14 @@ async function dispatch(route, input) {
   if (route === '/api/state') return state();
   if (route === '/api/platform') {
     const platform = validatePlatform(input.platform);
-    if (queue.runner || queue.starting || syncing || exiting || connecting) throw new Error('请先停止播放并等待同步结束，再切换页面版本');
-    bridge.platform = platform;
-    await save({platform});
-    broadcast();
+    if (queue.runner || queue.starting || queue.adding || syncing || exiting || connecting) throw new Error('请先停止播放并等待同步结束，再切换页面版本');
+    connecting = true;
+    try {
+      if(bridge.platform!==platform){await bridge.close();cacheOnly=true;}
+      bridge.platform = platform;
+      connection.message = `已选择${PLATFORMS[platform].name}，请登录并连接浏览器`;
+      await save({platform});
+    } finally {connecting=false;broadcast();}
     return state();
   }
   if (route === '/api/browser/open') {
@@ -127,12 +131,12 @@ async function dispatch(route, input) {
     return {endpoint:''};
   }
   if (route === '/api/connect') {
-    if (queue.runner || queue.starting || syncing || exiting || connecting) throw new Error('请先停止播放并等待同步结束');
+    if (queue.runner || queue.starting || queue.adding || syncing || exiting || connecting) throw new Error('请先停止播放并等待同步结束');
     connecting = true;
     cacheOnly = true;
     try {
       await bridge.connect((tabId, reason) => { lostConnection(tabId, reason).catch(console.error); });
-      connection = {...connection, connected:true, loginRequired:false, message:'已连接，请同步课程'};
+      connection = {...connection, connected:true, loginRequired:false, message:`已连接${PLATFORMS[bridge.platform].name}，请同步课程`};
     } catch (error) { connection.message = error.message; throw error; }
     finally { connecting = false; broadcast(); }
     return state();
@@ -144,11 +148,13 @@ async function dispatch(route, input) {
     await bridge.openTask(taskUrl(found.course, found.task, bridge.platform));
     return {ok:true};
   }
-  if (route === '/api/queue/start') {
-    if (!bridge.connected || cacheOnly || exiting) throw new Error('请连接并同步最新课程后开始');
+  if (route === '/api/queue/start' || route === '/api/queue/enqueue') {
+    if (!bridge.connected || cacheOnly || exiting || connecting) throw new Error('请连接并同步最新课程后开始');
     if (syncing) throw new Error('请等待课程同步完成');
-    await queue.start(input.ids, Number(input.speed), {mode:input.mode || 'background', concurrency:Number(input.concurrency ?? 2), muted:input.muted ?? false});
-    return state();
+    const options={mode:input.mode || 'background',concurrency:Number(input.concurrency ?? 2),muted:input.muted ?? false};
+    if(route==='/api/queue/start'){await queue.start(input.ids,Number(input.speed),options);return state();}
+    const added=await queue.enqueue(input.ids,Number(input.speed),options);
+    return {...state(),added};
   }
   if (route === '/api/queue/pause') await queue.pause();
   else if (route === '/api/queue/resume') queue.resume(input.id);

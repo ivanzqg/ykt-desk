@@ -1,6 +1,6 @@
 # 打包与服务器部署方案
 
-推荐使用 Chrome 插件：CI 在 Linux Runner 中构建 Manifest V3 ZIP，下载解压后加载到自己的 Chrome，在同一配置中手动登录。插件内置管理页面与后台调度，不需要本地 Node 服务。原 Windows 独立程序保留为手动构建方式。
+推荐使用 Chrome 插件：GitHub Actions在Ubuntu中构建Manifest V3 ZIP，下载解压后加载到自己的Chrome，在同一配置中手动登录。插件内置管理页面与后台调度，不需要本地Node服务。原Windows独立程序保留为手动构建方式。
 
 ## 交付方式
 
@@ -23,7 +23,7 @@ Node 版网页通过相对路径 `/api/*` 和 `/api/events` 请求本地 Node �
 
 ```mermaid
 flowchart LR
-  CI[GitLab 测试和Linux打包] --> ZIP[下载插件ZIP]
+  CI[GitHub Actions测试和打包] --> ZIP[下载插件ZIP]
   ZIP --> EXT[安装Chrome插件]
   EXT --> WEB[插件管理页面]
   WEB --> SERVICE[插件后台调度]
@@ -33,14 +33,14 @@ flowchart LR
 
 已配置的流水线：
 
-1. Linux Docker Runner执行`npm ci`、语法检查、单元测试。
-2. Linux Docker Runner使用相同Node.js版本执行插件构建。
+1. GitHub Actions的Ubuntu执行`npm ci`、语法检查、单元测试。
+2. 第二个Ubuntu job使用相同Node.js版本执行插件构建。
 3. 校验 Manifest、权限、后台和网页 JavaScript、所有网页资源、ZIP 内容和校验和。CI 不访问个人账号，也不播放课程视频。
 4. artifacts仅收集插件 ZIP、哈希、构建元数据和安装说明，不上传旧 EXE、`.local`、浏览器profile或captures。
 
 系统需要Chrome 118+，电脑需要保持运行。课程缓存和播放计划保存在插件本地存储，雨课堂登录由Chrome保存。关闭管理页面后活动 debugger 会话保持后台调度运行；点击“断开连接”停止队列。Chrome退出或系统睡眠后任务中断，重新打开时需主动连接、同步和开始。
 
-Runner要求：支持Docker的Linux Runner，可以拉取 `node:24.22.2-bookworm-slim` 并下载npm开发依赖，无需Windows Runner。安装方法与权限说明见 [Chrome 插件说明](chrome-extension.md)。
+GitHub托管的Ubuntu Runner可以完成测试和打包，无需自建Windows Runner。旧GitLab兼容配置保留使用 `node:24.22.2-bookworm-slim`。安装方法与权限说明见 [Chrome 插件说明](chrome-extension.md)。
 
 ## 方案二：服务器网页直接使用
 
@@ -83,4 +83,4 @@ flowchart LR
 
 本地8787服务保持停止。当前CI已改为Chrome插件打包，新增Manifest V3入口、Chrome调试适配、插件消息通信与存储，复用课程界面和并发队列。已生成本地插件ZIP并完成包校验和单元测试。
 
-项目仓库为 [zhaoqg26/ykt-desk](https://git.tsinghua.edu.cn/zhaoqg26/ykt-desk)，代码提交至 `master`。实际Runner执行情况以GitLab的CI/CD页面为准。服务器部署当前是方案，没有开放外部端口或迁移登录信息。无需重新启动服务来阅读或下载程序。
+主仓库为 [ivanzqg/ykt-desk](https://github.com/ivanzqg/ykt-desk/tree/master)，代码提交至 `master`。实际执行情况以GitHub Actions页面为准。服务器部署当前是方案，没有开放外部端口或迁移登录信息。无需重新启动服务来阅读或下载程序。

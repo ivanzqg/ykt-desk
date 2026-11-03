@@ -18,14 +18,14 @@ test('platform selection maps login, assignment and video URLs while retaining t
   assert.throws(()=>validatePlatform('__proto__'));
   assert.throws(()=>taskUrl(course,{type:6,url:'https://example.com/exercise'},'official'));
 });
-test('playback lanes inherit the selected platform while the course data page stays shared',async()=>{
-  const root=new BrowserCore();root.cdp={connected:true};root.dataPage={sessionId:'school-data'};root.platform='official';
+test('playback lanes inherit the selected platform and its shared data page',async()=>{
+  const root=new BrowserCore();root.cdp={connected:true};root.dataPage={sessionId:'official-data'};root.platform='official';
   const lane=root.createPlaybackLane();
   assert.equal(lane.platform,'official');assert.equal(lane.dataPage,root.dataPage);
   let opened;
   lane.playbackPolicy=async()=>({});lane.newPage=async url=>{opened=url;return {sessionId:1};};lane.waitForPage=async()=>{};
   await lane.navigateVideo(course,{type:0,leafId:6067660});
-  assert.equal(new URL(opened).origin,OFFICIAL);assert.equal(root.dataPage.sessionId,'school-data');
+  assert.equal(new URL(opened).origin,OFFICIAL);assert.equal(root.dataPage.sessionId,'official-data');
 });
 test('HTML video is muted before play, can toggle without seeking, and keeps its volume',async()=>{
   const bridge=new BrowserCore();bridge.cdp={connected:true};bridge.playerPage={sessionId:1};

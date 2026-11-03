@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import { BrowserCore, SCHOOL, loginUrl } from './browser-core.mjs';
+import { BrowserCore, loginUrl } from './browser-core.mjs';
 export { SCHOOL, SPEEDS, validatePageUrl, videoUrl } from './browser-core.mjs';
 const LOOPBACK = new Set(['127.0.0.1', '[::1]', 'localhost']);
 export function validateEndpoint(value) {
@@ -65,8 +65,9 @@ export class BrowserBridge extends BrowserCore {
     const next = await Cdp.open(info.webSocketDebuggerUrl);
     await this.close(); this.cdp = next; this.endpoint = safe; this.studentIds.clear();
     this.dataPage = null; this.playerPage = null;
-    this.dataPage = await this.newPage(`${SCHOOL}/pro/`);
-    await this.waitForPage(this.dataPage, SCHOOL);
+    const url = loginUrl(this.platform);
+    this.dataPage = await this.newPage(url);
+    await this.waitForPage(this.dataPage, new URL(url).origin);
     return info.Browser;
   }
 }

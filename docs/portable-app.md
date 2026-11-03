@@ -1,6 +1,6 @@
 # 雨课堂学习台：直接运行版
 
-此文档描述保留的 Node SEA 直接运行版。当前 GitLab CI 已改为发布 Chrome 插件，安装插件请阅读 [Chrome 插件说明](chrome-extension.md)。独立程序仅通过 `npm run build:exe` 手动构建。
+此文档描述保留的Node SEA直接运行版。当前GitHub Actions发布Chrome插件，安装插件请阅读 [Chrome 插件说明](chrome-extension.md)。独立程序仅通过 `npm run build:exe` 手动构建。
 
 1. 从本地 `dist/` 取得已手动构建的可执行文件。
 2. 双击 `YuketangStudyDesk-1.0.0-windows-x64.exe`，本地网页会自动打开。

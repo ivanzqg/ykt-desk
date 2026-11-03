@@ -18,7 +18,7 @@ export class PlaybackPool {
   constructor(bridge,findTask,update,refresh,{timing = {}, planChanged = ()=>{}} = {}) {
     this.bridge=bridge;this.findTask=findTask;this.update=update;this.refresh=refresh;
     this.timing=timing;this.planChanged=planChanged;
-    this.active=new Map();this.controller=null;this.runner=null;this.starting=false;
+    this.active=new Map();this.controller=null;this.runner=null;this.starting=false;this.adding=false;
     this.state={status:'idle',items:[],activeId:null,activeIds:[],mode:'background',concurrency:2,speed:1.5,muted:false,requiresForeground:null,message:'选择视频，开始后台播放',updatedAt:null};
   }
   emit() {
@@ -34,67 +34,102 @@ export class PlaybackPool {
     this.state.updatedAt=new Date().toISOString();this.update();
   }
   async start(ids,speed,{mode='background',concurrency=2,muted=false}={}) {
-    if(this.runner || this.starting)throw new Error('请先停止当前队列');
+    if(this.runner || this.starting || this.adding)throw new Error('请先停止当前队列并等待添加完成');
     validatePlaybackOptions(mode,concurrency);
     if(typeof muted!=='boolean')throw new Error('无效的静音选项');
     if(!SPEEDS.includes(speed))throw new Error('无效倍速');
-    if(!Array.isArray(ids) || !ids.every(id=>typeof id==='string'))throw new Error('无效的任务列表');
-    const unique=[...new Set(ids)];
-    if(!unique.length || unique.length>200)throw new Error('请选择 1–200 个视频');
-    const items=unique.map(id=>{
-      const found=this.findTask(id);
-      if(!found || found.task.type!==0 || found.task.expired || ['completed','unknown'].includes(found.task.status))throw new Error('请选择当前课程中未完成且未超时的视频');
-      return {id,courseId:found.course.id,name:found.task.name,courseName:found.course.name,status:'queued',position:0,duration:0,coverage:null,speed,muted,message:''};
-    });
+    const items=this.makeItems(this.uniqueIds(ids),speed,muted);
     this.starting=true;
     this.controller=new AbortController();
     try {
-      if(concurrency>1 && items.length>1){
-        const courseCounts=new Map();
-        for(const item of items)courseCounts.set(item.courseId,(courseCounts.get(item.courseId)||0)+1);
-        for(const [courseId,count]of courseCounts){
-          if(count>1 && !(await this.bridge.playbackPolicy(courseId)).multiplePlayAllowed)throw new Error('课程设置不允许同时播放多视频，请将并发数设为 1');
-        }
-      }
+      await this.checkPolicies(items,concurrency);
       if(this.controller.signal.aborted)throw new Error('队列启动已取消');
       this.state={status:'running',items,activeId:null,activeIds:[],mode,concurrency,speed,muted,requiresForeground:null,message:'正在启动播放会话',updatedAt:null};
       this.emit();this.planChanged(this.plan());
       this.runner=this.run(this.controller.signal).finally(()=>{this.runner=null;});
     } finally {this.starting=false;}
   }
+  uniqueIds(ids) {
+    if(!Array.isArray(ids) || !ids.every(id=>typeof id==='string'))throw new Error('无效的任务列表');
+    const unique=[...new Set(ids)];
+    if(!unique.length || unique.length>200)throw new Error('请选择 1–200 个视频');
+    return unique;
+  }
+  makeItems(ids,speed,muted) {
+    return ids.map(id=>{
+      const found=this.findTask(id);
+      if(!found || found.task.type!==0 || found.task.expired || ['completed','unknown'].includes(found.task.status))throw new Error('请选择当前课程中未完成且未超时的视频');
+      return {id,courseId:found.course.id,name:found.task.name,courseName:found.course.name,status:'queued',position:0,duration:0,coverage:null,speed,muted,message:''};
+    });
+  }
+  async checkPolicies(items,concurrency) {
+    if(concurrency<=1)return;
+    const courseCounts=new Map();
+    for(const item of items)courseCounts.set(item.courseId,(courseCounts.get(item.courseId)||0)+1);
+    for(const [courseId,count]of courseCounts){
+      if(count>1 && !(await this.bridge.playbackPolicy(courseId)).multiplePlayAllowed)throw new Error('课程设置不允许同时播放多视频，请将并发数设为 1');
+    }
+  }
+  async enqueue(ids,speed,options={}) {
+    if(this.runner && ['finished','stopped'].includes(this.state.status))await this.runner;
+    if(!this.runner){await this.start(ids,speed,options);return this.state.items.length;}
+    if(this.starting || this.adding || this.controller.signal.aborted)throw new Error('队列正在启动、停止或添加，请稍候');
+    const controller=this.controller;
+    const known=new Set(this.state.items.map(i=>i.id));
+    const newIds=this.uniqueIds(ids).filter(id=>!known.has(id));
+    if(!newIds.length)return 0;
+    if(this.state.items.length+newIds.length>200)throw new Error('一个队列最多容纳 200 个视频');
+    this.adding=true;
+    try {
+      const items=this.makeItems(newIds,this.state.speed,this.state.muted);
+      await this.checkPolicies([...this.state.items.filter(i=>!['completed','skipped','stopped','failed'].includes(i.status)),...items],this.state.concurrency);
+      if(controller.signal.aborted || this.controller!==controller)throw new Error('队列已停止，未添加新任务');
+      // Speed/mute may change while the read-only policy request is pending.
+      for(const item of items){item.speed=this.state.speed;item.muted=this.state.muted;}
+      this.state.items.push(...items);this.planChanged(this.plan());this.emit();
+      return items.length;
+    } finally {this.adding=false;}
+  }
   plan() { return {ids:this.state.items.filter(i=>!['completed','skipped'].includes(i.status)).map(i=>i.id),mode:this.state.mode,concurrency:this.state.concurrency,speed:this.state.speed,muted:this.state.muted}; }
+  async runItem(item,signal) {
+    let queue,lane;
+    try {lane=this.bridge.createPlaybackLane(this.state.mode);}
+    catch(error){item.status='failed';item.message=error.message;this.emit();return;}
+    queue=new PlaybackQueue(lane,this.findTask,()=>{
+      const inner=queue.state.items[0];
+      if(inner)Object.assign(item,inner);
+      this.emit();
+    },async()=>{},this.timing);
+    this.active.set(item.id,{item,queue,lane});
+    try {
+      await queue.start([item.id],this.state.speed,{muted:this.state.muted});
+      if(this.state.status==='paused')await queue.pause();
+      if(signal.aborted)await queue.stop();
+      await queue.runner;
+      if(item.status==='completed')await this.refresh(item.courseId).catch(()=>{});
+    } catch(error) {item.status='failed';item.message=error.message;}
+    finally {
+      await lane.close().catch(()=>{});this.bridge.lanes?.delete(lane);
+      this.active.delete(item.id);this.planChanged(this.plan());this.emit();
+    }
+  }
   async run(signal) {
     let cursor=0;
-    const worker=async()=>{
-      while(!signal.aborted && cursor<this.state.items.length){
-        while(this.state.status==='paused'&&!signal.aborted)await sleep(200,signal);
-        if(signal.aborted)break;
-        const item=this.state.items[cursor++];
-        if(item.status==='skipped')continue;
-        let queue,lane;
-        try {lane=this.bridge.createPlaybackLane(this.state.mode);}
-        catch(error){item.status='failed';item.message=error.message;this.emit();continue;}
-        queue=new PlaybackQueue(lane,this.findTask,()=>{
-          const inner=queue.state.items[0];
-          if(inner)Object.assign(item,inner);
-          this.emit();
-        },async()=>{},this.timing);
-        this.active.set(item.id,{item,queue,lane});
-        try {
-          await queue.start([item.id],this.state.speed,{muted:this.state.muted});
-          if(this.state.status==='paused')await queue.pause();
-          if(signal.aborted)await queue.stop();
-          await queue.runner;
-          if(item.status==='completed')await this.refresh(item.courseId).catch(()=>{});
-        } catch(error) {item.status='failed';item.message=error.message;}
-        finally {
-          await lane.close().catch(()=>{});this.bridge.lanes?.delete(lane);
-          this.active.delete(item.id);this.planChanged(this.plan());this.emit();
+    const jobs=new Set();
+    try {
+      while(!signal.aborted){
+        while(this.state.status!=='paused' && !signal.aborted && jobs.size<this.state.concurrency && cursor<this.state.items.length){
+          const item=this.state.items[cursor++];
+          if(item.status!=='queued')continue;
+          const job=this.runItem(item,signal);
+          jobs.add(job);job.then(()=>jobs.delete(job),()=>jobs.delete(job));
         }
+        if(!jobs.size && cursor>=this.state.items.length && !this.adding)break;
+        await sleep(this.timing.pollMs || 200,signal);
       }
-    };
-    try { await Promise.all(Array.from({length:Math.min(this.state.concurrency,this.state.items.length)},worker)); }
+    }
     finally {
+      await Promise.allSettled(jobs);
       for(const item of this.state.items)if(['queued','loading','playing','verifying','needs_attention','waiting_focus'].includes(item.status))item.status='stopped';
       this.state.activeIds=[];this.state.activeId=null;this.state.status=signal.aborted?'stopped':'finished';
       this.state.message=signal.aborted?'已停止，所有播放会话已暂停':'队列已结束';this.planChanged(this.plan());this.emit();

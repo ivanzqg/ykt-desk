@@ -34,6 +34,7 @@ assert.ok(html.includes('断开连接') && html.includes('id="endpoint" type="hi
 const concurrencyOptions=html.match(/<select id="concurrencySelect">([\s\S]*?)<\/select>/)?.[1] || '';
 assert.deepEqual([...concurrencyOptions.matchAll(/<option value="(\d+)"/g)].map(m=>Number(m[1])),Array.from({length:MAX_CONCURRENCY},(_,i)=>i+1),'网页与后台的并发范围不一致');
 assert.ok(html.includes('id="platformSelect"') && html.includes('value="official"') && html.includes('id="muteVideos"'),'插件缺少页面版本或静音选项');
+assert.ok(html.includes('id="selectAllVideos"') && html.includes('id="queueSummary"') && text('app.js').includes('/api/queue/enqueue'),'插件缺少多选或追加队列入口');
 for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) assert.ok(files[match[1]], '缺少网页资源：'+match[1]);
 const worker = text('service-worker.js');
 assert.ok(!/\b(?:from\s*['"]node:|require\s*\(|process\.|fetch\(['"]http:\/\/)/.test(worker), '插件后台包含 Node 或本地服务依赖');

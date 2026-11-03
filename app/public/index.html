@@ -26,7 +26,7 @@
         <div class="connection-icon">↗</div><div class="connection-copy"><h2>连接你的雨课堂</h2><p id="connectionMessage">在 Chrome 中手动登录，然后连接学习台。</p></div>
         <label class="platform-label" for="platformSelect">页面版本 <select id="platformSelect"><option value="school">校园版</option><option value="official">雨课堂版</option></select></label>
         <button class="button secondary" id="openBrowser">打开登录浏览器</button><button class="button primary" id="connectButton">连接浏览器</button>
-        <div class="platform-note" id="platformNote" hidden>课程列表通过校园版同步。首次使用请先登录校园版，再登录雨课堂版。<button class="text-button" id="openSchoolLogin">打开校园版登录页 ↗</button></div>
+        <div class="platform-note">连接、课程同步、视频和作业使用所选版本。切换后需重新连接。</div>
         <details class="advanced"><summary>使用已打开的浏览器</summary><div><label for="endpoint">本机浏览器连接地址</label><input id="endpoint" value="http://[::1]:9222" spellcheck="false"><span>已有调试窗口可直接连接；新打开的窗口使用独立配置。</span></div></details>
       </section>
       <div id="cacheBanner" class="cache-banner" hidden>正在展示上次读取的课程，请连接浏览器并同步后开始播放。</div>
@@ -40,7 +40,7 @@
         <section class="tasks-panel">
           <div class="section-head"><div><div class="eyebrow" id="courseSubtitle">全部课程</div><h2 id="courseTitle">待办任务</h2></div><button class="text-button" id="refreshCourse" hidden>刷新此课程</button></div>
           <div class="toolbar"><div class="filters" id="taskFilters"><button data-filter="all" class="selected">全部</button><button data-filter="video">视频</button><button data-filter="assignment">作业 / 练习</button><button data-filter="completed">已完成</button></div><label class="search"><span>⌕</span><input id="search" placeholder="搜索任务或课程" aria-label="搜索任务"></label></div>
-          <div class="selection-bar"><label><input type="checkbox" id="selectAll">选择本页可播放视频</label><span id="selectionCount">未选择</span><button class="text-button" id="clearSelection">清空选择</button></div>
+          <div class="selection-bar"><label><input type="checkbox" id="selectAll">选择本页可播放视频</label><button class="text-button" id="selectAllVideos">多选全部课程视频</button><span id="selectionCount">未选择</span><button class="text-button" id="clearSelection">清空选择</button></div>
           <div class="table-wrap"><table><thead><tr><th class="check-col"></th><th>学习任务</th><th>截止时间</th><th>状态</th><th></th></tr></thead><tbody id="taskRows"></tbody></table></div>
           <div class="empty" id="emptyState" hidden><div>✓</div><h3>这里暂时没有待办</h3><p>可以切换课程或任务类型，查看其他学习内容。</p></div>
           <footer class="panel-footer"><span id="taskCount">0 项任务</span><span id="lastSync">尚未同步</span></footer>
@@ -53,7 +53,8 @@
           <label class="speed-label" for="playbackMode">播放方式 <select id="playbackMode"><option value="background">后台播放</option><option value="foreground">前台播放</option></select></label>
           <label class="speed-label" for="concurrencySelect">同时播放 <select id="concurrencySelect"><option value="1">1 个视频</option><option value="2" selected>2 个视频</option><option value="3">3 个视频</option><option value="4">4 个视频</option><option value="5">5 个视频</option><option value="6">6 个视频</option><option value="7">7 个视频</option><option value="8">8 个视频</option><option value="9">9 个视频</option><option value="10">10 个视频</option><option value="11">11 个视频</option><option value="12">12 个视频</option><option value="13">13 个视频</option><option value="14">14 个视频</option><option value="15">15 个视频</option><option value="16">16 个视频</option></select></label>
           <label class="mute-label" for="muteVideos"><span>视频静音</span><input type="checkbox" id="muteVideos"><small>播放期间也可切换</small></label>
-          <button class="button primary wide" id="startQueue">▶ 开始播放所选视频</button>
+          <button class="button primary wide" id="startQueue">▶ 多选并加入队列</button>
+          <div class="queue-summary" id="queueSummary">按并发上限播放，其余视频自动排队</div>
           <div class="queue-controls" id="queueControls" hidden><button class="button secondary" id="pauseQueue">暂停</button><button class="button secondary" id="resumeQueue" hidden>继续</button><button class="button secondary" id="stopQueue">停止</button></div>
           <div class="player-links" id="playerLinks" hidden><button id="focusPlayer" class="text-button">打开播放页面 ↗</button><button id="skipVideo" class="text-button">跳过当前</button></div>
           <div class="queue-message" id="queueMessage" role="status"></div><ol class="queue-list" id="queueList"></ol>

@@ -87,8 +87,9 @@ export class BrowserCore {
   }
   async api(route, classroomId) {
     if (!route.startsWith('/') || route.startsWith('//') || !/^\/(mooc-api|c27|video-log)\//.test(route)) throw new Error('无效的课程请求');
-    return this.evaluate(this.dataPage, `(${async function (route, classroomId) {
-      if (location.origin !== 'https://tsinghua.yuketang.cn') throw new Error('请在新打开的雨课堂页完成登录，然后重新连接');
+    const origin = PLATFORMS[validatePlatform(this.platform)].origin;
+    return this.evaluate(this.dataPage, `(${async function (route, classroomId, origin) {
+      if (location.origin !== origin) throw new Error('请在所选版本的雨课堂页完成登录，然后重新连接');
       const headers = { 'xtbz': 'cloud', 'university-id': '2598', 'uv-id': '2598', 'platform-id': '3', 'terminal-type': 'web', 'x-client': 'web' };
       if (classroomId) headers['classroom-id'] = String(classroomId);
       const response = await fetch(route, { method: 'GET', credentials: 'same-origin', headers, signal: AbortSignal.timeout(15000), redirect: 'error' });
@@ -96,7 +97,7 @@ export class BrowserCore {
       const json = await response.json();
       if (json.success === false || (json.errcode && json.errcode !== 0)) throw new Error(json.msg || json.errmsg || '读取课程失败，请检查登录');
       return json.data || json;
-    }.toString()})(${JSON.stringify(route)},${JSON.stringify(classroomId || null)})`);
+    }.toString()})(${JSON.stringify(route)},${JSON.stringify(classroomId || null)},${JSON.stringify(origin)})`);
   }
   async courses() {
     const data = await this.api('/mooc-api/v1/lms/user/user-courses/?status=1&page=1&no_page=1&no_term=true&uv_id=2598');

@@ -92,3 +92,64 @@ test('stop during policy loading cancels startup before a video is opened',async
   await until(()=>!!release);await f.pool.stop();release();
   await assert.rejects(starting,/取消/);assert.equal(f.lanes.length,0);
 });
+test('adding after a one-video start fills vacant slots without changing concurrency or mute',async t=>{
+  const f=fixture(5);t.after(()=>f.pool.stop());
+  await f.pool.start([f.tasks[0].id],1.5,{concurrency:3,muted:true});
+  await until(()=>f.pool.state.items[0].status==='playing');
+  assert.equal(await f.pool.enqueue(f.tasks.slice(1).map(t=>t.id),2,{concurrency:16,muted:false}),4);
+  await until(()=>f.pool.state.items.filter(i=>i.status==='playing').length===3);
+  assert.equal(f.lanes.length,3);assert.equal(f.pool.state.concurrency,3);assert.equal(f.pool.state.muted,true);
+  assert.equal(f.pool.state.items.filter(i=>i.status==='queued').length,2);
+  f.lanes[0].done=true;
+  await until(()=>f.lanes.length===4);assert.equal(f.maxOpened(),3);assert.equal(f.lanes[3].leafId,4);
+  assert.equal(f.lanes[3].muted,true);assert.equal(f.pool.plan().ids.length,4);
+});
+test('multi-select queue completes every task in order and ignores duplicate additions',async t=>{
+  const f=fixture(5);t.after(()=>f.pool.stop());
+  assert.equal(await f.pool.enqueue([f.tasks[0].id],1.5,{concurrency:2}),1);
+  await until(()=>f.pool.state.items[0].status==='playing');
+  assert.equal(await f.pool.enqueue([f.tasks[0].id,...f.tasks.slice(1).map(t=>t.id),f.tasks[1].id],1),4);
+  assert.equal(await f.pool.enqueue([f.tasks[0].id],1),0);
+  for(let i=0;i<f.tasks.length;i++){
+    await until(()=>f.lanes.length>i&&f.lanes[i].leafId!==null);
+    assert.equal(f.lanes[i].leafId,i+1);f.lanes[i].done=true;
+  }
+  await until(()=>f.pool.state.status==='finished');
+  assert.ok(f.pool.state.items.every(i=>i.status==='completed'));assert.ok(f.maxOpened()<=2);assert.equal(f.opened(),0);
+});
+test('append while paused waits for resume and respects the initial serial limit',async t=>{
+  const f=fixture(3);t.after(()=>f.pool.stop());
+  await f.pool.start([f.tasks[0].id],1.5,{concurrency:1});
+  await until(()=>f.pool.state.items[0].status==='playing');await f.pool.pause();
+  await f.pool.enqueue(f.tasks.slice(1).map(t=>t.id),2,{concurrency:16});
+  await new Promise(r=>setTimeout(r,20));assert.equal(f.lanes.length,1);assert.equal(f.pool.state.status,'paused');
+  f.pool.resume();f.lanes[0].done=true;await until(()=>f.lanes.length===2);
+  assert.equal(f.maxOpened(),1);assert.equal(f.lanes[1].leafId,2);
+});
+test('invalid or platform-blocked additions are atomic and cannot exceed 200 queue entries',async t=>{
+  const f=fixture(201);t.after(()=>f.pool.stop());
+  await f.pool.start([f.tasks[0].id],1.5,{concurrency:2});
+  await assert.rejects(f.pool.enqueue([f.tasks[1].id,'missing'],1),/未完成/);assert.equal(f.pool.state.items.length,1);
+  await assert.rejects(f.pool.enqueue(f.tasks.slice(1).map(t=>t.id),1),/200/);assert.equal(f.pool.state.items.length,1);
+  f.bridge.playbackPolicy=async()=>({multiplePlayAllowed:false});
+  await assert.rejects(f.pool.enqueue([f.tasks[1].id],1),/不允许/);assert.equal(f.pool.state.items.length,1);
+});
+test('stop during append-policy lookup prevents late additions from reopening playback',async t=>{
+  const f=fixture(2);t.after(()=>f.pool.stop());
+  await f.pool.start([f.tasks[0].id],1.5,{concurrency:2});
+  await until(()=>f.pool.state.items[0].status==='playing');
+  let release;f.bridge.playbackPolicy=()=>new Promise(resolve=>{release=()=>resolve({multiplePlayAllowed:true});});
+  const adding=f.pool.enqueue([f.tasks[1].id],1.5);
+  await until(()=>!!release);await f.pool.stop();release();
+  await assert.rejects(adding,/已停止/);assert.equal(f.pool.state.items.length,1);assert.equal(f.opened(),0);
+});
+test('pending append keeps a draining queue alive until new tasks are admitted',async t=>{
+  const f=fixture(2);t.after(()=>f.pool.stop());
+  await f.pool.start([f.tasks[0].id],1.5,{concurrency:2});
+  await until(()=>f.pool.state.items[0].status==='playing');
+  let release;f.bridge.playbackPolicy=()=>new Promise(resolve=>{release=()=>resolve({multiplePlayAllowed:true});});
+  const adding=f.pool.enqueue([f.tasks[1].id],1.5);await until(()=>!!release);
+  f.lanes[0].done=true;await until(()=>f.opened()===0);
+  assert.notEqual(f.pool.state.status,'finished');release();await adding;
+  await until(()=>f.lanes.length===2);assert.equal(f.lanes[1].leafId,2);
+});

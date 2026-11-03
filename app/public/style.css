@@ -7,3 +7,4 @@
  .task-actions{display:flex;gap:6px;margin-top:4px}.task-error{color:#a37248!important}.queue-list li>.badge{align-self:flex-start;flex-shrink:0}
  .service-controls{display:flex;align-items:center;gap:12px}
  .platform-label{display:flex;align-items:center;gap:8px;font-size:11px;color:#6c7e69}.platform-label select{padding:8px 10px;border:1px solid #cdd8c8;border-radius:6px;background:#f9fbf6;color:var(--green);font-size:11px}.platform-note{width:100%;font-size:10px;color:#6c7e69;line-height:1.9}.mute-label{display:flex;align-items:center;flex-wrap:wrap;gap:8px;font-size:11px;color:#7c8d78;margin:17px 0}.mute-label input{margin-left:auto}.mute-label small{width:100%;font-size:9px;color:#99a48f}
+ .queue-summary{font-size:10px;line-height:1.8;color:var(--muted);margin:10px 0}.selection-bar{flex-wrap:wrap}

@@ -1,0 +1,53 @@
+name: Chrome extension
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: chrome-extension-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.2'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: npm test
+
+  package-extension:
+    needs: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.2'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run build:extension
+        env:
+          CI_COMMIT_SHA: ${{ github.sha }}
+          CI_PIPELINE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      - run: npm run test:extension
+      - uses: actions/upload-artifact@v4
+        with:
+          name: yuketang-chrome-${{ github.run_number }}
+          path: |
+            dist/chrome-extension/*.zip
+            dist/chrome-extension/*.sha256
+            dist/chrome-extension/*.build.json
+            dist/chrome-extension/安装说明.md
+          if-no-files-found: error
+          retention-days: 30
