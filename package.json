@@ -1,0 +1,24 @@
+{
+  "name": "yuketang-study-desk",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local Yuketang course dashboard and video playback sessions",
+  "engines": {
+    "node": ">=24.0"
+  },
+  "scripts": {
+    "start": "node app/server.mjs",
+    "test": "node --test app/tests/*.test.mjs",
+    "check": "node scripts/check.mjs",
+    "build:extension": "node scripts/build-extension.mjs",
+    "test:extension": "node scripts/verify-extension.mjs",
+    "build:exe": "node scripts/build-executable.mjs",
+    "test:exe": "node scripts/smoke-executable.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "fflate": "0.8.2",
+    "postject": "1.0.0-alpha.6"
+  }
+}

@@ -1,0 +1,20 @@
+node_modules/
+.build/
+dist/
+.local/
+chrome-rea-profile/
+captures/
+*-evidence*.json
+*-analysis-*.json
+*-analysis-*.txt
+*-feasibility-*.json
+*-feasibility-*.txt
+*-text.txt
+
+# Local investigation scripts and screenshots of personal course data.
+/capture-ykt.mjs
+/inspect-captures.mjs
+/summarize-ykt.mjs
+/summarize-feasibility.mjs
+/app-preview.png
+/app-background-preview.png

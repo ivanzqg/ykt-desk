@@ -1,0 +1,31 @@
+stages:
+  - verify
+  - package
+
+verify:
+  stage: verify
+  image: "node:24.22.2-bookworm-slim"
+  script:
+    - npm ci --ignore-scripts --no-audit --no-fund
+    - npm run check
+    - npm test
+  interruptible: true
+
+package_extension:
+  stage: package
+  image: "node:24.22.2-bookworm-slim"
+  needs:
+    - verify
+  script:
+    - npm ci --ignore-scripts --no-audit --no-fund
+    - npm run build:extension
+    - npm run test:extension
+  artifacts:
+    name: "yuketang-chrome-$CI_COMMIT_REF_SLUG-$CI_COMMIT_SHORT_SHA"
+    paths:
+      - dist/chrome-extension/*.zip
+      - dist/chrome-extension/*.sha256
+      - dist/chrome-extension/*.build.json
+      - dist/chrome-extension/安装说明.md
+    expire_in: 30 days
+  interruptible: true

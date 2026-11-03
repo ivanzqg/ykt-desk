@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="local-token" content="__LOCAL_TOKEN__">
+  <meta name="theme-color" content="#123a32">
+  <title>雨课堂 · 学习台</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">雨</span><span>学习台<small>YUKETANG STUDY DESK</small></span></a>
+      <div class="nav-label">我的学习空间</div>
+      <button class="nav-item active" id="navCourses"><span>▦</span>课程与待办<span id="navCount">—</span></button>
+      <div class="sidebar-heading"><span>课程</span><select id="termFilter" aria-label="课程学期"><option value="current">当前学期</option><option value="all">全部学期</option></select></div>
+      <div id="courseList" class="course-list"></div>
+      <div class="sidebar-bottom"><span class="local-dot"></span>本地学习工具<small>登录和播放均在你的浏览器中进行</small></div>
+    </aside>
+    <main>
+      <header class="topbar"><div class="breadcrumbs">学习空间 <span>/</span> 课程与待办</div><div class="service-controls"><div class="connection-chip" id="connectionChip"><i></i>浏览器未连接</div><button class="text-button" id="stopService">退出工具</button></div></header>
+      <section class="page-heading"><div><div class="eyebrow">一步一步，保持进度</div><h1>今天，继续学习。</h1><p>把课程待办放在一起，按你的节奏观看视频。</p></div><button class="button secondary" id="syncButton">↻ 同步课程</button></section>
+      <section class="connection-panel" id="connectionPanel">
+        <div class="connection-icon">↗</div><div class="connection-copy"><h2>连接你的雨课堂</h2><p id="connectionMessage">在 Chrome 中手动登录，然后连接学习台。</p></div>
+        <button class="button secondary" id="openBrowser">打开登录浏览器</button><button class="button primary" id="connectButton">连接浏览器</button>
+        <details class="advanced"><summary>使用已打开的浏览器</summary><div><label for="endpoint">本机浏览器连接地址</label><input id="endpoint" value="http://[::1]:9222" spellcheck="false"><span>已有调试窗口可直接连接；新打开的窗口使用独立配置。</span></div></details>
+      </section>
+      <div id="cacheBanner" class="cache-banner" hidden>正在展示上次读取的课程，请连接浏览器并同步后开始播放。</div>
+      <section class="stats-grid" aria-label="学习概览">
+        <article><span>课程班级</span><strong id="statCourses">—</strong><small id="statCoursesDetail">全部课程</small></article>
+        <article><span>待看视频</span><strong id="statVideos">—</strong><small>按正常观看覆盖率记录</small></article>
+        <article><span>作业与练习</span><strong id="statAssignments">—</strong><small>在雨课堂页面中处理</small></article>
+        <article><span>已超时待办</span><strong id="statExpired" class="warm">—</strong><small>超时任务不会自动加入播放</small></article>
+      </section>
+      <div class="workspace">
+        <section class="tasks-panel">
+          <div class="section-head"><div><div class="eyebrow" id="courseSubtitle">全部课程</div><h2 id="courseTitle">待办任务</h2></div><button class="text-button" id="refreshCourse" hidden>刷新此课程</button></div>
+          <div class="toolbar"><div class="filters" id="taskFilters"><button data-filter="all" class="selected">全部</button><button data-filter="video">视频</button><button data-filter="assignment">作业 / 练习</button><button data-filter="completed">已完成</button></div><label class="search"><span>⌕</span><input id="search" placeholder="搜索任务或课程" aria-label="搜索任务"></label></div>
+          <div class="selection-bar"><label><input type="checkbox" id="selectAll">选择本页可播放视频</label><span id="selectionCount">未选择</span><button class="text-button" id="clearSelection">清空选择</button></div>
+          <div class="table-wrap"><table><thead><tr><th class="check-col"></th><th>学习任务</th><th>截止时间</th><th>状态</th><th></th></tr></thead><tbody id="taskRows"></tbody></table></div>
+          <div class="empty" id="emptyState" hidden><div>✓</div><h3>这里暂时没有待办</h3><p>可以切换课程或任务类型，查看其他学习内容。</p></div>
+          <footer class="panel-footer"><span id="taskCount">0 项任务</span><span id="lastSync">尚未同步</span></footer>
+        </section>
+        <aside class="player-panel">
+          <div class="section-head"><div class="player-label"><span class="play-icon">▶</span><h2>视频队列</h2></div><span id="queueBadge" class="badge neutral">未开始</span></div>
+          <div class="queue-intro" id="queueIntro"><span class="queue-art">▷</span><h3>把学习安排好</h3><p>选择待看视频，在后台播放。可同时运行多个视频，分别核对服务器完成状态。</p></div>
+          <div class="now-playing" id="nowPlaying" hidden><small>当前视频</small><h3 id="playingTitle"></h3><p id="playingCourse"></p><div class="progress-track"><div id="playProgress"></div></div><div class="time-row"><span id="playTime">00:00 / 00:00</span><span id="actualSpeed">1.5×</span></div><div class="coverage-row"><span>服务器观看覆盖率</span><strong id="serverCoverage">等待读取</strong></div></div>
+          <label class="speed-label" for="speedSelect">播放倍速 <select id="speedSelect"><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select></label>
+          <label class="speed-label" for="playbackMode">播放方式 <select id="playbackMode"><option value="background">后台播放</option><option value="foreground">前台播放</option></select></label>
+          <label class="speed-label" for="concurrencySelect">同时播放 <select id="concurrencySelect"><option value="1">1 个视频</option><option value="2" selected>2 个视频</option><option value="3">3 个视频</option><option value="4">4 个视频</option></select></label>
+          <button class="button primary wide" id="startQueue">▶ 开始播放所选视频</button>
+          <div class="queue-controls" id="queueControls" hidden><button class="button secondary" id="pauseQueue">暂停</button><button class="button secondary" id="resumeQueue" hidden>继续</button><button class="button secondary" id="stopQueue">停止</button></div>
+          <div class="player-links" id="playerLinks" hidden><button id="focusPlayer" class="text-button">打开播放页面 ↗</button><button id="skipVideo" class="text-button">跳过当前</button></div>
+          <div class="queue-message" id="queueMessage" role="status"></div><ol class="queue-list" id="queueList"></ol>
+          <div class="player-note" id="playerPolicy">部分课程要求播放窗口保持焦点；开始后会读取当前课程设置。</div>
+        </aside>
+      </div>
+      <footer class="page-footer">学习进度以雨课堂服务器返回为准。<span>只在本机运行 · 手动登录</span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="alert" hidden></div>
+</body>
+</html>
