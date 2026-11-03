@@ -2,8 +2,9 @@ import http from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { BrowserBridge, launchLoginBrowser, SCHOOL, SPEEDS } from './browser.mjs';
-import { PlaybackPool } from './pool.mjs';
+import { BrowserBridge, launchLoginBrowser, SPEEDS } from './browser.mjs';
+import { PLATFORMS, validatePlatform, taskUrl } from './browser-core.mjs';
+import { PlaybackPool, MAX_CONCURRENCY } from './pool.mjs';
 import { mapCourse, mapTask, mergeCourse } from './data.mjs';
 import { packaged, projectRoot, dataDirectory, readPublicAsset } from './runtime.mjs';
 import { openDashboard } from './open-browser.mjs';
@@ -20,6 +21,7 @@ let connection = { connected:false, endpoint:bridge.endpoint, browser:null, mess
 let restoredPlan = null;
 const clients = new Set();
 await mkdir(local,{recursive:true});
+try { const preferences=JSON.parse(await readFile(path.join(local,'preferences.json'),'utf8')); if(Object.hasOwn(PLATFORMS,preferences.platform))bridge.platform=preferences.platform; } catch {}
 try { restoredPlan=JSON.parse(await readFile(path.join(local,'playback-plan.json'),'utf8')); } catch {}
 try {
   const cache = JSON.parse(await readFile(path.join(local,'dashboard.json'),'utf8'));
@@ -42,7 +44,7 @@ function save() {
   saveChain = saveChain.catch(() => {}).then(() => writeFile(path.join(local,'dashboard.json'),snapshot)).catch(error => console.error('Cannot save course cache:',error.message));
 }
 function state() {
-  return { connection:{...connection, connected:bridge.connected}, courses, syncing, syncMessage, lastSync, cacheOnly, queue:queue.state, supportedSpeeds:SPEEDS, restoredPlan };
+  return { connection:{...connection, connected:bridge.connected}, platform:bridge.platform, maxConcurrency:MAX_CONCURRENCY, courses, syncing, syncMessage, lastSync, cacheOnly, queue:queue.state, supportedSpeeds:SPEEDS, restoredPlan };
 }
 function broadcast() {
   const event = `data: ${JSON.stringify(state())}\n\n`;
@@ -127,9 +129,16 @@ const server = http.createServer(async (request,response) => {
         connection = { connected:true, endpoint:bridge.endpoint, browser, loginRequired:false, message:'浏览器已连接，请同步课程' };
         broadcast(); return json(response,200,state());
       }
+      if (url.pathname === '/api/platform') {
+        const platform=validatePlatform(input.platform);
+        if(queue.runner || queue.starting || syncing)throw new Error('请先停止播放并等待同步结束，再切换页面版本');
+        bridge.platform=platform;
+        saveChain=saveChain.catch(()=>{}).then(()=>writeFile(path.join(local,'preferences.json'),JSON.stringify({platform},null,2)));
+        await saveChain; broadcast(); return json(response,200,state());
+      }
       if (url.pathname === '/api/browser/open') {
         if (queue.runner || queue.starting || syncing) throw new Error('请先停止当前任务');
-        const endpoint = await launchLoginBrowser(path.join(local,'chrome-profile'));
+        const endpoint = await launchLoginBrowser(path.join(local,'chrome-profile'),input.platform ?? bridge.platform);
         connection = {...connection,endpoint,message:'已打开 Chrome，请在雨课堂页手动登录后连接',loginRequired:true};
         broadcast(); return json(response,200,{endpoint});
       }
@@ -137,20 +146,21 @@ const server = http.createServer(async (request,response) => {
       if (url.pathname === '/api/course/refresh') { const course = await refreshCourse(input.id,true); return json(response,200,course); }
       if (url.pathname === '/api/task/open') {
         const found = findTask(input.id); if (!found) throw new Error('未找到任务');
-        const url = found.task.url || `${SCHOOL}/pro/lms/${encodeURIComponent(found.course.sign)}/${found.course.id}/studycontent`;
+        const url = taskUrl(found.course,found.task,bridge.platform);
         await bridge.openTask(url); return json(response,200,{ok:true});
       }
       if (url.pathname === '/api/queue/start') {
         if (!bridge.connected || cacheOnly) throw new Error('请连接浏览器并同步最新课程后开始');
         if (syncing) throw new Error('请等待课程同步完成');
         if (!Array.isArray(input.ids) || !input.ids.every(id=>typeof id==='string')) throw new Error('无效的任务列表');
-        await queue.start(input.ids,Number(input.speed),{mode:input.mode || 'background',concurrency:Number(input.concurrency || 2)}); return json(response,200,state());
+        await queue.start(input.ids,Number(input.speed),{mode:input.mode || 'background',concurrency:Number(input.concurrency ?? 2),muted:input.muted ?? false}); return json(response,200,state());
       }
       if (url.pathname === '/api/queue/pause') { await queue.pause(); return json(response,200,state()); }
       if (url.pathname === '/api/queue/resume') { queue.resume(input.id); return json(response,200,state()); }
       if (url.pathname === '/api/queue/stop') { await queue.stop(); return json(response,200,state()); }
       if (url.pathname === '/api/queue/skip') { await queue.skip(input.id); return json(response,200,state()); }
       if (url.pathname === '/api/queue/speed') { await queue.setSpeed(Number(input.speed)); return json(response,200,state()); }
+      if (url.pathname === '/api/queue/mute') { await queue.setMuted(input.muted); return json(response,200,state()); }
       if (url.pathname === '/api/player/focus') { await queue.focusPlayer(input.id); return json(response,200,{ok:true}); }
       return json(response,404,{error:'接口不存在'});
     }

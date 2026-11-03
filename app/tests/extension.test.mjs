@@ -2,7 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {build} from 'esbuild';
-import {ChromeTransport, recoverOwnedTabs} from '../../extension/browser.mjs';
+import {ChromeTransport, ExtensionBrowser, recoverOwnedTabs} from '../../extension/browser.mjs';
 import {validateManifest} from '../../scripts/extension-package.mjs';
 import {readFile} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
@@ -13,9 +13,10 @@ class Event {
   removeListener(fn) { this.listeners.delete(fn); }
   fire(...args) { return [...this.listeners].map(fn => fn(...args)); }
 }
-function fakeChrome() {
+function fakeChrome(stored = {}) {
   const tabs = new Map(), attached = new Set(), calls = [], local = {}, session = {};
   const onDetach = new Event(), onRemoved = new Event();
+  Object.assign(local, structuredClone(stored));
   let sequence = 0, focusSupported = true;
   const storageArea = store => ({
     async get(keys) { return Object.fromEntries((Array.isArray(keys)?keys:[keys]).filter(k => k in store).map(k => [k, structuredClone(store[k])])); },
@@ -138,8 +139,8 @@ test('Manifest fails validation if extra domains or external messaging are enabl
 
 // Exercise the bundled MV3 entry point and the real serialized student API fetch.
 const workerBundle=build({entryPoints:[fileURLToPath(new URL('../../extension/service-worker.mjs',import.meta.url))],write:false,bundle:true,format:'iife',platform:'browser',target:'chrome118',minify:false});
-async function workerFixture() {
-  const f=fakeChrome();
+async function workerFixture(stored) {
+  const f=fakeChrome(stored);
   const bundle=await workerBundle;
   vm.runInNewContext(bundle.outputFiles[0].text,{chrome:f.api,structuredClone,URL,AbortController,setTimeout,clearTimeout,console});
   const sender={id:f.api.runtime.id,url:f.api.runtime.getURL('index.html')};
@@ -175,4 +176,44 @@ test('bundled worker connects, syncs course todos, and disconnects without a loc
   assert.ok(!('cookie' in request[2].headers));
   const disconnected=await f.action('/api/service/stop');assert.equal(disconnected.connection.connected,false);
   assert.deepEqual([...f.tabs.keys()],[loginId]);assert.equal(f.attached.size,0);
+});
+test('platform choice persists, opens official assignments, and keeps catalog requests on school origin',async()=>{
+  const task={id:'1:5',leafId:5,type:6,name:'作业',url:'https://tsinghua.yuketang.cn/ai-workspace/lms-graph/1/exercise/5?node_id=7&fromProIframe=1&isyth=1'};
+  const f=await workerFixture({courses:[{id:1,sign:'sign',tasks:[task]}]});
+  await assert.rejects(f.action('/api/platform',{platform:'other'}),/校园版/);
+  const chosen=await f.action('/api/platform',{platform:'official'});
+  assert.equal(chosen.platform,'official');assert.equal(chosen.maxConcurrency,16);assert.equal(f.local.platform,'official');
+  await f.action('/api/browser/open');
+  assert.equal([...f.tabs.values()][0].url,'https://pro.yuketang.cn/v2/web');
+  await f.action('/api/browser/open',{platform:'school'});
+  assert.equal([...f.tabs.values()][1].url,'https://tsinghua.yuketang.cn/pro/');
+  await f.action('/api/connect');
+  const dataTab=[...f.tabs.values()].find(t=>f.attached.has(t.id));
+  assert.equal(new URL(dataTab.url).origin,'https://tsinghua.yuketang.cn');
+  await f.action('/api/task/open',{id:task.id});
+  const opened=[...f.tabs.values()].at(-1);
+  assert.equal(new URL(opened.url).origin,'https://pro.yuketang.cn');assert.equal(new URL(opened.url).pathname,'/ai-workspace/lms-graph/1/exercise/5');
+  assert.equal(new URL(opened.url).searchParams.get('node_id'),'7');
+  await f.action('/api/service/stop');
+  const reloaded=await workerFixture(f.local);
+  assert.equal((await reloaded.action('/api/state')).platform,'official');
+});
+test('restored sixteen-video and mute preferences survive worker restart without autoplay',async()=>{
+  const plan={ids:['1:4'],mode:'background',concurrency:16,speed:2,muted:true};
+  const f=await workerFixture({restoredPlan:plan,platform:'official'});
+  const state=await f.action('/api/state');
+  assert.deepEqual(JSON.parse(JSON.stringify(state.restoredPlan)),plan);assert.equal(state.queue.status,'idle');assert.equal(f.tabs.size,0);
+  await assert.rejects(f.action('/api/queue/mute',{muted:'true'}),/静音/);
+});
+test('extension mute controls the owned tab as well as the media without muting other sites',async()=>{
+  const f=fakeChrome(),transport=new ChromeTransport(f.api),bridge=new ExtensionBrowser();
+  bridge.cdp=transport;
+  bridge.dataPage=await transport.create('https://tsinghua.yuketang.cn/pro/',false);
+  bridge.playerPage=await transport.create('https://pro.yuketang.cn/ai-workspace/lms-graph/1/video/2',true,true);
+  assert.equal(f.tabs.get(bridge.playerPage.sessionId).muted,true);
+  const media={muted:true};bridge.evaluate=async(_page,expression)=>vm.runInNewContext(expression,{location:{origin:'https://pro.yuketang.cn'},document:{querySelector:()=>media}});
+  await bridge.setMuted(false);assert.equal(media.muted,false);assert.equal(f.tabs.get(bridge.playerPage.sessionId).muted,false);
+  const tab=f.tabs.get(bridge.playerPage.sessionId);tab.url='https://example.com/';
+  await assert.rejects(bridge.setMuted(true),/雨课堂/);assert.equal(tab.muted,false);
+  await transport.close();
 });

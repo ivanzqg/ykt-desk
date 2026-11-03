@@ -24,7 +24,9 @@
       <section class="page-heading"><div><div class="eyebrow">一步一步，保持进度</div><h1>今天，继续学习。</h1><p>把课程待办放在一起，按你的节奏观看视频。</p></div><button class="button secondary" id="syncButton">↻ 同步课程</button></section>
       <section class="connection-panel" id="connectionPanel">
         <div class="connection-icon">↗</div><div class="connection-copy"><h2>连接你的雨课堂</h2><p id="connectionMessage">在 Chrome 中手动登录，然后连接学习台。</p></div>
+        <label class="platform-label" for="platformSelect">页面版本 <select id="platformSelect"><option value="school">校园版</option><option value="official">雨课堂版</option></select></label>
         <button class="button secondary" id="openBrowser">打开登录浏览器</button><button class="button primary" id="connectButton">连接浏览器</button>
+        <div class="platform-note" id="platformNote" hidden>课程列表通过校园版同步。首次使用请先登录校园版，再登录雨课堂版。<button class="text-button" id="openSchoolLogin">打开校园版登录页 ↗</button></div>
         <details class="advanced"><summary>使用已打开的浏览器</summary><div><label for="endpoint">本机浏览器连接地址</label><input id="endpoint" value="http://[::1]:9222" spellcheck="false"><span>已有调试窗口可直接连接；新打开的窗口使用独立配置。</span></div></details>
       </section>
       <div id="cacheBanner" class="cache-banner" hidden>正在展示上次读取的课程，请连接浏览器并同步后开始播放。</div>
@@ -49,7 +51,8 @@
           <div class="now-playing" id="nowPlaying" hidden><small>当前视频</small><h3 id="playingTitle"></h3><p id="playingCourse"></p><div class="progress-track"><div id="playProgress"></div></div><div class="time-row"><span id="playTime">00:00 / 00:00</span><span id="actualSpeed">1.5×</span></div><div class="coverage-row"><span>服务器观看覆盖率</span><strong id="serverCoverage">等待读取</strong></div></div>
           <label class="speed-label" for="speedSelect">播放倍速 <select id="speedSelect"><option value="1">1×</option><option value="1.25">1.25×</option><option value="1.5" selected>1.5×</option><option value="2">2×</option></select></label>
           <label class="speed-label" for="playbackMode">播放方式 <select id="playbackMode"><option value="background">后台播放</option><option value="foreground">前台播放</option></select></label>
-          <label class="speed-label" for="concurrencySelect">同时播放 <select id="concurrencySelect"><option value="1">1 个视频</option><option value="2" selected>2 个视频</option><option value="3">3 个视频</option><option value="4">4 个视频</option></select></label>
+          <label class="speed-label" for="concurrencySelect">同时播放 <select id="concurrencySelect"><option value="1">1 个视频</option><option value="2" selected>2 个视频</option><option value="3">3 个视频</option><option value="4">4 个视频</option><option value="5">5 个视频</option><option value="6">6 个视频</option><option value="7">7 个视频</option><option value="8">8 个视频</option><option value="9">9 个视频</option><option value="10">10 个视频</option><option value="11">11 个视频</option><option value="12">12 个视频</option><option value="13">13 个视频</option><option value="14">14 个视频</option><option value="15">15 个视频</option><option value="16">16 个视频</option></select></label>
+          <label class="mute-label" for="muteVideos"><span>视频静音</span><input type="checkbox" id="muteVideos"><small>播放期间也可切换</small></label>
           <button class="button primary wide" id="startQueue">▶ 开始播放所选视频</button>
           <div class="queue-controls" id="queueControls" hidden><button class="button secondary" id="pauseQueue">暂停</button><button class="button secondary" id="resumeQueue" hidden>继续</button><button class="button secondary" id="stopQueue">停止</button></div>
           <div class="player-links" id="playerLinks" hidden><button id="focusPlayer" class="text-button">打开播放页面 ↗</button><button id="skipVideo" class="text-button">跳过当前</button></div>

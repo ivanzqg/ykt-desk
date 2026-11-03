@@ -12,22 +12,25 @@ export class PlaybackQueue {
   constructor(bridge, findTask, update, refresh, timing = {}) {
     this.bridge = bridge; this.findTask = findTask; this.update = update; this.refresh = refresh;
     this.pollMs = timing.pollMs || 2000; this.verifyMs = timing.verifyMs || 5000; this.verifyAttempts = timing.verifyAttempts || 6; this.loadAttempts = timing.loadAttempts || 30;
-    this.state = { status:'idle', items:[], activeId:null, speed:1.5, requiresForeground:null, message:'选择视频，开始学习', updatedAt:null };
-    this.runner = null; this.controller = null;
+    this.state = { status:'idle', items:[], activeId:null, speed:1.5, muted:false, requiresForeground:null, message:'选择视频，开始学习', updatedAt:null };
+    this.runner = null; this.controller = null; this.resumePending = false;
   }
   emit() { this.state.updatedAt = new Date().toISOString(); this.update(); }
-  async start(ids, speed) {
+  async start(ids, speed, {muted=false} = {}) {
     if (this.runner || ['running','paused','needs_attention'].includes(this.state.status)) throw new Error('请先停止当前队列');
     if (!SPEEDS.includes(speed)) throw new Error('无效倍速');
+    if (typeof muted !== 'boolean') throw new Error('无效的静音选项');
     const unique = [...new Set(ids)];
     if (!unique.length || unique.length > 200) throw new Error('请选择 1–200 个视频');
     const items = unique.map(id => {
       const found = this.findTask(id);
       if (!found || found.task.type !== 0) throw new Error('队列只能包含当前课程列表中的视频');
       if (found.task.expired || found.task.status === 'completed') throw new Error('请选择未完成且未超时的视频');
-      return { id, courseId:found.course.id, name:found.task.name, courseName:found.course.name, status:'queued', position:0, duration:0, coverage:null, speed, message:'' };
+      return { id, courseId:found.course.id, name:found.task.name, courseName:found.course.name, status:'queued', position:0, duration:0, coverage:null, speed, muted, message:'' };
     });
-    this.state = { status:'running', items, activeId:null, speed, requiresForeground:null, message:'正在打开视频', updatedAt:null };
+    this.state = { status:'running', items, activeId:null, speed, muted, requiresForeground:null, message:'正在打开视频', updatedAt:null };
+    this.bridge.muted = muted;
+    this.resumePending = false;
     this.controller = new AbortController();
     this.emit();
     this.runner = this.run(this.controller.signal).finally(() => { this.runner = null; });
@@ -35,6 +38,7 @@ export class PlaybackQueue {
   async pause() {
     if (!['running','waiting_focus'].includes(this.state.status)) return;
     this.state.status = 'paused'; this.state.message = '已暂停'; this.emit();
+    this.resumePending = true;
     await this.bridge.pause();
   }
   resume() {
@@ -57,6 +61,13 @@ export class PlaybackQueue {
     if (!SPEEDS.includes(speed)) throw new Error('无效倍速');
     if (this.state.activeId && ['running','paused'].includes(this.state.status)) await this.bridge.setSpeed(speed);
     this.state.speed = speed; this.emit();
+  }
+  async setMuted(muted) {
+    if(typeof muted!=='boolean')throw new Error('无效的静音选项');
+    this.state.muted=muted;
+    await this.bridge.setMuted(muted);
+    for(const item of this.state.items)item.muted=muted;
+    this.emit();
   }
   async gate(signal, item) {
     while (!signal.aborted && !item.skipRequested && ['paused','needs_attention'].includes(this.state.status)) {
@@ -131,7 +142,8 @@ export class PlaybackQueue {
             while (!signal.aborted && !item.skipRequested) {
               const wasPaused = this.state.status === 'paused';
               if (!await this.gate(signal,item)) break;
-              if (wasPaused) {
+              if (wasPaused || this.resumePending) {
+                this.resumePending = false;
                 if (!await this.waitForForeground(signal,item)) break;
                 await this.bridge.setSpeed(this.state.speed); await this.bridge.play(); stalled = 0;
               }
@@ -145,6 +157,7 @@ export class PlaybackQueue {
                 continue;
               }
               item.position = video.currentTime; item.duration = video.duration; item.speed = video.rate;
+              item.muted = video.muted ?? this.state.muted;
               item.status = video.ended ? 'verifying' : 'playing';
               item.message = video.ended ? '正在核对服务器完成状态' : '正在正常播放';
               this.state.message = item.message; this.emit();

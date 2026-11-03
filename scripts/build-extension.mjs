@@ -28,7 +28,7 @@ html = html.replace(/\s*<meta name="local-token"[^>]+>/,'')
   .replace(/<details class="advanced">[\s\S]*?<\/details>/, '<input id="endpoint" type="hidden" value="">')
   .replace('打开登录浏览器','打开雨课堂登录页').replace('退出工具','断开连接')
   .replace('本地学习工具','Chrome 学习插件')
-  .replace('在 Chrome 中手动登录，然后连接学习台。','在当前 Chrome 中手动登录清华雨课堂，然后连接学习台。')
+  .replace('在 Chrome 中手动登录，然后连接学习台。','选择页面版本，在当前 Chrome 中手动登录后连接学习台。')
   .replace('只在本机运行 · 手动登录','Chrome 插件 · 手动登录');
 const instructions = await readFile(path.join(root, 'docs/chrome-extension.md'));
 const files = {

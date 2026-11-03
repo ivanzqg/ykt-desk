@@ -2,9 +2,10 @@ import { PlaybackQueue } from './queue.mjs';
 import { SPEEDS } from './browser-core.mjs';
 
 export const PLAYBACK_MODES = ['background','foreground'];
+export const MAX_CONCURRENCY = 16;
 export function validatePlaybackOptions(mode,concurrency) {
   if (!PLAYBACK_MODES.includes(mode)) throw new Error('无效的播放方式');
-  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > 4) throw new Error('并发数请选择 1–4');
+  if (!Number.isInteger(concurrency) || concurrency < 1 || concurrency > MAX_CONCURRENCY) throw new Error(`并发数请选择 1–${MAX_CONCURRENCY}`);
   if (mode === 'foreground' && concurrency !== 1) throw new Error('前台模式仅支持同时播放一个视频');
 }
 const sleep = (ms,signal) => new Promise(resolve=>{
@@ -18,7 +19,7 @@ export class PlaybackPool {
     this.bridge=bridge;this.findTask=findTask;this.update=update;this.refresh=refresh;
     this.timing=timing;this.planChanged=planChanged;
     this.active=new Map();this.controller=null;this.runner=null;this.starting=false;
-    this.state={status:'idle',items:[],activeId:null,activeIds:[],mode:'background',concurrency:2,speed:1.5,requiresForeground:null,message:'选择视频，开始后台播放',updatedAt:null};
+    this.state={status:'idle',items:[],activeId:null,activeIds:[],mode:'background',concurrency:2,speed:1.5,muted:false,requiresForeground:null,message:'选择视频，开始后台播放',updatedAt:null};
   }
   emit() {
     const live=[...this.active.values()];
@@ -32,9 +33,10 @@ export class PlaybackPool {
     }
     this.state.updatedAt=new Date().toISOString();this.update();
   }
-  async start(ids,speed,{mode='background',concurrency=2}={}) {
+  async start(ids,speed,{mode='background',concurrency=2,muted=false}={}) {
     if(this.runner || this.starting)throw new Error('请先停止当前队列');
     validatePlaybackOptions(mode,concurrency);
+    if(typeof muted!=='boolean')throw new Error('无效的静音选项');
     if(!SPEEDS.includes(speed))throw new Error('无效倍速');
     if(!Array.isArray(ids) || !ids.every(id=>typeof id==='string'))throw new Error('无效的任务列表');
     const unique=[...new Set(ids)];
@@ -42,7 +44,7 @@ export class PlaybackPool {
     const items=unique.map(id=>{
       const found=this.findTask(id);
       if(!found || found.task.type!==0 || found.task.expired || ['completed','unknown'].includes(found.task.status))throw new Error('请选择当前课程中未完成且未超时的视频');
-      return {id,courseId:found.course.id,name:found.task.name,courseName:found.course.name,status:'queued',position:0,duration:0,coverage:null,speed,message:''};
+      return {id,courseId:found.course.id,name:found.task.name,courseName:found.course.name,status:'queued',position:0,duration:0,coverage:null,speed,muted,message:''};
     });
     this.starting=true;
     this.controller=new AbortController();
@@ -55,12 +57,12 @@ export class PlaybackPool {
         }
       }
       if(this.controller.signal.aborted)throw new Error('队列启动已取消');
-      this.state={status:'running',items,activeId:null,activeIds:[],mode,concurrency,speed,requiresForeground:null,message:'正在启动播放会话',updatedAt:null};
+      this.state={status:'running',items,activeId:null,activeIds:[],mode,concurrency,speed,muted,requiresForeground:null,message:'正在启动播放会话',updatedAt:null};
       this.emit();this.planChanged(this.plan());
       this.runner=this.run(this.controller.signal).finally(()=>{this.runner=null;});
     } finally {this.starting=false;}
   }
-  plan() { return {ids:this.state.items.filter(i=>!['completed','skipped'].includes(i.status)).map(i=>i.id),mode:this.state.mode,concurrency:this.state.concurrency,speed:this.state.speed}; }
+  plan() { return {ids:this.state.items.filter(i=>!['completed','skipped'].includes(i.status)).map(i=>i.id),mode:this.state.mode,concurrency:this.state.concurrency,speed:this.state.speed,muted:this.state.muted}; }
   async run(signal) {
     let cursor=0;
     const worker=async()=>{
@@ -79,7 +81,7 @@ export class PlaybackPool {
         },async()=>{},this.timing);
         this.active.set(item.id,{item,queue,lane});
         try {
-          await queue.start([item.id],this.state.speed);
+          await queue.start([item.id],this.state.speed,{muted:this.state.muted});
           if(this.state.status==='paused')await queue.pause();
           if(signal.aborted)await queue.stop();
           await queue.runner;
@@ -127,6 +129,14 @@ export class PlaybackPool {
     if(!SPEEDS.includes(speed))throw new Error('无效倍速');
     const outcomes=await Promise.allSettled([...this.active.values()].map(x=>x.queue.setSpeed(speed)));
     this.state.speed=speed;this.emit();
+    const error=outcomes.find(x=>x.status==='rejected');if(error)throw error.reason;
+  }
+  async setMuted(muted) {
+    if(typeof muted!=='boolean')throw new Error('无效的静音选项');
+    this.state.muted=muted;
+    for(const item of this.state.items)if(item.status==='queued')item.muted=muted;
+    const outcomes=await Promise.allSettled([...this.active.values()].map(x=>x.queue.setMuted(muted)));
+    this.planChanged(this.plan());this.emit();
     const error=outcomes.find(x=>x.status==='rejected');if(error)throw error.reason;
   }
   async focusPlayer(id=this.state.activeId) {const entry=this.active.get(id);if(entry)await entry.lane.focusPlayer();}

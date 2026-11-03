@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import { BrowserCore, SCHOOL } from './browser-core.mjs';
+import { BrowserCore, SCHOOL, loginUrl } from './browser-core.mjs';
 export { SCHOOL, SPEEDS, validatePageUrl, videoUrl } from './browser-core.mjs';
 const LOOPBACK = new Set(['127.0.0.1', '[::1]', 'localhost']);
 export function validateEndpoint(value) {
@@ -71,14 +71,15 @@ export class BrowserBridge extends BrowserCore {
   }
 }
 
-export async function launchLoginBrowser(profileRoot) {
+export async function launchLoginBrowser(profileRoot, platform = 'school') {
+  const url = loginUrl(platform);
   if (process.platform !== 'win32') throw new Error('自动打开浏览器目前支持 Windows；其他系统请连接已启动的 Chrome');
   const candidates = [path.join(process.env.PROGRAMFILES || 'C:/Program Files', 'Google/Chrome/Application/chrome.exe'), path.join(process.env.LOCALAPPDATA || '', 'Google/Chrome/Application/chrome.exe')];
   let executable;
   for (const candidate of candidates) { try { await access(candidate); executable = candidate; break; } catch {} }
   if (!executable) throw new Error('未找到 Chrome，请手动启动并填写连接地址');
   await mkdir(profileRoot, { recursive: true });
-  const child = spawn(executable, ['--remote-debugging-port=9333', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${profileRoot}`, `${SCHOOL}/pro/`], { detached: true, stdio: 'ignore', windowsHide: false });
+  const child = spawn(executable, ['--remote-debugging-port=9333', '--remote-debugging-address=127.0.0.1', `--user-data-dir=${profileRoot}`, url], { detached: true, stdio: 'ignore', windowsHide: false });
   await new Promise((resolve, reject) => { child.once('spawn', resolve); child.once('error', reject); });
   child.unref();
   return 'http://127.0.0.1:9333';

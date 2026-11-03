@@ -1,19 +1,52 @@
 export const SCHOOL = 'https://tsinghua.yuketang.cn';
-const ORIGINS = new Set([SCHOOL, 'https://pro.yuketang.cn']);
+export const OFFICIAL = 'https://pro.yuketang.cn';
+const ORIGINS = new Set([SCHOOL, OFFICIAL]);
+export const PLATFORMS = {school:{origin:SCHOOL,name:'校园版'},official:{origin:OFFICIAL,name:'雨课堂版'}};
 export const SPEEDS = [0.5, 1, 1.25, 1.5, 2];
+export function validatePlatform(platform) {
+  if (!Object.hasOwn(PLATFORMS, platform)) throw new Error('请选择校园版或雨课堂版');
+  return platform;
+}
+export function loginUrl(platform = 'school') {
+  validatePlatform(platform);
+  return platform === 'school' ? `${SCHOOL}/pro/` : `${OFFICIAL}/v2/web`;
+}
 export function validatePageUrl(value) {
   const url = new URL(value);
   if (!ORIGINS.has(url.origin) || url.username || url.password) throw new Error('只能打开雨课堂课程页面');
   return url.href;
 }
-export function videoUrl(course, task) {
+export function platformPageUrl(value, platform = 'school') {
+  validatePlatform(platform);
+  const url = new URL(validatePageUrl(value));
+  url.host = new URL(PLATFORMS[platform].origin).host;
+  // School-only iframe flags are unnecessary in the official standalone workspace.
+  if (platform === 'official') { url.searchParams.delete('fromProIframe'); url.searchParams.delete('isyth'); }
+  return url.href;
+}
+export function courseUrl(course, platform = 'school') {
+  validatePlatform(platform);
+  return platform === 'school'
+    ? `${SCHOOL}/pro/lms/${encodeURIComponent(course.sign)}/${course.id}/studycontent`
+    : `${OFFICIAL}/v2/web/studentLog/${course.id}?university_id=2598&platform_id=3&classroom_id=${course.id}&content_url=`;
+}
+export function taskUrl(course, task, platform = 'school') {
+  if (task.url) {
+    const url = new URL(validatePageUrl(task.url));
+    // LMS landing pages use different paths on the two platforms.
+    if (url.pathname.startsWith('/pro/lms/') || url.pathname.startsWith('/v2/web/studentLog/')) return courseUrl(course, platform);
+    return platformPageUrl(url.href, platform);
+  }
+  return task.type === 0 ? videoUrl(course, task, platform) : courseUrl(course, platform);
+}
+export function videoUrl(course, task, platform) {
   if (task.type !== 0 || !Number.isSafeInteger(Number(task.leafId))) throw new Error('此任务不是视频');
-  if (task.url) return validatePageUrl(task.url);
-  return `${SCHOOL}/ai-workspace/lms-graph/${course.id}/video/${task.leafId}?node_id=${task.chapterId || 0}&fromProIframe=1&isyth=1&is_chapter=1`;
+  const url = task.url ? validatePageUrl(task.url) : `${SCHOOL}/ai-workspace/lms-graph/${course.id}/video/${task.leafId}?node_id=${task.chapterId || 0}&fromProIframe=1&isyth=1&is_chapter=1`;
+  return platform === undefined ? url : platformPageUrl(url, platform);
 }
 
 export class BrowserCore {
-  constructor() { this.cdp = null; this.dataPage = null; this.playerPage = null; this.playerPolicy = null; this.studentIds = new Map(); this.endpoint = 'http://[::1]:9222'; this.background = false; this.ownsConnection = true; this.lanes = new Set(); }
+  constructor() { this.cdp = null; this.dataPage = null; this.playerPage = null; this.playerPolicy = null; this.studentIds = new Map(); this.endpoint = 'http://[::1]:9222'; this.platform = 'school'; this.muted = false; this.background = false; this.ownsConnection = true; this.lanes = new Set(); }
   get connected() { return this.cdp?.connected === true; }
   async newPage(url) {
     validatePageUrl(url);
@@ -28,6 +61,7 @@ export class BrowserCore {
     const lane = new this.constructor();
     lane.cdp = this.cdp; lane.dataPage = this.dataPage; lane.studentIds = this.studentIds;
     lane.endpoint = this.endpoint; lane.background = mode === 'background'; lane.ownsConnection = false;
+    lane.platform = this.platform;
     this.lanes.add(lane);
     return lane;
   }
@@ -90,7 +124,7 @@ export class BrowserCore {
     return data[String(task.leafId)] || { completed: 0, rate: 0, watch_length: 0, video_length: 0 };
   }
   async navigateVideo(course, task) {
-    const url = videoUrl(course, task);
+    const url = videoUrl(course, task, this.platform);
     this.playerPolicy = await this.playbackPolicy(course.id);
     if (!this.playerPage) this.playerPage = await this.newPage(url);
     else await this.cdp.call('Page.navigate', { url }, this.playerPage.sessionId);
@@ -108,7 +142,7 @@ export class BrowserCore {
       if (!video) return { ...view, exists: false };
       const speed = document.querySelector('.xt_video_player_speed');
       const availableSpeeds = visible(speed) ? [...speed.querySelectorAll('[data-speed]')].map(el => Number(el.dataset.speed)).filter(n => n > 0 && n <= 2) : [1];
-      return { ...view, exists: true, currentTime: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : 0, paused: video.paused, ended: video.ended, readyState: video.readyState, rate: video.playbackRate, availableSpeeds, error: video.error ? '视频加载失败：' + video.error.code : null };
+      return { ...view, exists: true, currentTime: video.currentTime, duration: Number.isFinite(video.duration) ? video.duration : 0, paused: video.paused, ended: video.ended, readyState: video.readyState, rate: video.playbackRate, muted:video.muted, availableSpeeds, error: video.error ? '视频加载失败：' + video.error.code : null };
     }.toString()})()`);
     return { ...state, requiresForeground:this.playerPolicy?.requiresForeground ?? null, backgroundSession:this.background };
   }
@@ -141,14 +175,25 @@ export class BrowserCore {
     }.toString()})(${JSON.stringify(selector)})`);
   }
   async play() {
-    return this.evaluate(this.playerPage, `(${async function (requiresForeground) {
+    return this.evaluate(this.playerPage, `(${async function (requiresForeground, muted) {
       if (!['https://tsinghua.yuketang.cn', 'https://pro.yuketang.cn'].includes(location.origin)) throw new Error('播放器已离开雨课堂');
       const video = document.querySelector('video.xt_video_player') || document.querySelector('video');
       if (!video) throw new Error('播放器尚未加载');
+      video.muted = muted;
       if (requiresForeground && (document.visibilityState !== 'visible' || !document.hasFocus())) return false;
       await video.play();
       return true;
-    }.toString()})(${this.playerPolicy?.requiresForeground === true})`);
+    }.toString()})(${this.playerPolicy?.requiresForeground === true},${this.muted})`);
+  }
+  async setMuted(muted) {
+    if (typeof muted !== 'boolean') throw new Error('无效的静音选项');
+    this.muted = muted;
+    if (!this.playerPage || !this.connected) return;
+    await this.evaluate(this.playerPage, `(${function (muted) {
+      if (!['https://tsinghua.yuketang.cn','https://pro.yuketang.cn'].includes(location.origin)) throw new Error('播放器已离开雨课堂');
+      const video = document.querySelector('video.xt_video_player') || document.querySelector('video');
+      if (video) video.muted = muted;
+    }.toString()})(${muted})`);
   }
   async pause() {
     if (!this.playerPage || !this.connected) return;

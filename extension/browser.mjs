@@ -27,13 +27,13 @@ export class ChromeTransport {
     this.attached.delete(tabId);
     this.onLost(tabId, reason);
   }
-  async create(url, background) {
+  async create(url, background, muted = false) {
     validatePageUrl(url);
     const tab = await this.api.tabs.create({url, active:!background});
     this.owned.set(tab.id, {tabId:tab.id, url});
     try {
       await this.save();
-      await this.api.tabs.update(tab.id, {autoDiscardable:false});
+      await this.api.tabs.update(tab.id, {autoDiscardable:false, muted});
       await this.api.debugger.attach({tabId:tab.id}, '1.3');
       this.attached.add(tab.id);
       await this.call('Runtime.enable', {}, tab.id);
@@ -97,7 +97,22 @@ export class ExtensionBrowser extends BrowserCore {
       return 'Chrome 插件';
     } catch (error) { await this.close(); throw error; }
   }
-  async newPage(url) { return this.cdp.create(url, this.background); }
+  async newPage(url) {
+    const page = await this.cdp.create(url, this.background, this.muted);
+    // The user may toggle mute while the debugger is attaching to the new tab.
+    try { await this.cdp.api.tabs.update(page.sessionId, {muted:this.muted}); }
+    catch (error) { await this.cdp.closeTab(page.sessionId); throw error; }
+    return page;
+  }
+  async setMuted(muted) {
+    if (typeof muted !== 'boolean') throw new Error('无效的静音选项');
+    if (this.playerPage && this.connected) {
+      const tab = await this.cdp.api.tabs.get(this.playerPage.sessionId);
+      validatePageUrl(tab.pendingUrl || tab.url);
+      await this.cdp.api.tabs.update(this.playerPage.sessionId, {muted});
+    }
+    await super.setMuted(muted);
+  }
   async openTask(url) { return chrome.tabs.create({url:validatePageUrl(url), active:true}); }
   async close() {
     for (const lane of this.lanes) await lane.close().catch(() => {});

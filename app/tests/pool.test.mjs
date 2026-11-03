@@ -11,8 +11,9 @@ function fixture(count=3){
     const lane={mode,leafId:null,paused:false,position:0,done:false,closed:false,
       progress:async()=>({completed:lane.done?1:0,rate:lane.done?1:0.1}),
       navigateVideo:async(_c,t)=>{lane.leafId=t.leafId;},
-      playerState:async()=>({exists:true,duration:100,currentTime:lane.position++,paused:lane.paused,ended:false,rate:1.5,requiresForeground:true,visibilityState:'visible',focused:true}),
+      playerState:async()=>({exists:true,duration:100,currentTime:lane.position++,paused:lane.paused,ended:false,rate:1.5,muted:lane.muted,requiresForeground:true,visibilityState:'visible',focused:true}),
       setSpeed:async()=>{},play:async()=>{lane.paused=false;},pause:async()=>{lane.paused=true;},focusPlayer:async()=>{},
+      setMuted:async muted=>{lane.muted=muted;},
       close:async()=>{if(!lane.closed){lane.closed=true;opened--;}}
     };
     lanes.push(lane);bridge.lanes.add(lane);return lane;
@@ -51,10 +52,38 @@ test('a course disabling simultaneous playback blocks parallel startup',async()=
   assert.equal(f.lanes.length,0);
 });
 test('front mode stays serial and invalid concurrency is rejected',()=>{
-  assert.doesNotThrow(()=>validatePlaybackOptions('background',4));
+  assert.doesNotThrow(()=>validatePlaybackOptions('background',16));
   assert.throws(()=>validatePlaybackOptions('foreground',2));
   assert.throws(()=>validatePlaybackOptions('background',0));
-  assert.throws(()=>validatePlaybackOptions('background',5));
+  assert.throws(()=>validatePlaybackOptions('background',17));
+  assert.throws(()=>validatePlaybackOptions('background',1.5));
+});
+test('sixteen workers keep the seventeenth video queued and stop every player',async t=>{
+  const f=fixture(17);
+  t.after(()=>f.pool.stop());
+  await f.pool.start(f.tasks.map(t=>t.id),1.5,{mode:'background',concurrency:16});
+  await until(()=>f.pool.state.items.filter(i=>i.status==='playing').length===16);
+  assert.equal(f.lanes.length,16);assert.equal(f.pool.state.items[16].status,'queued');
+  f.lanes[0].done=true;
+  await until(()=>f.lanes.length===17&&f.pool.state.items[16].status==='playing');
+  assert.equal(f.maxOpened(),16);
+  await f.pool.stop();assert.equal(f.opened(),0);assert.ok(f.lanes.every(l=>l.paused&&l.closed));
+});
+test('mute applies to active and subsequent videos, survives pause, and persists in the plan',async t=>{
+  const f=fixture(3);
+  t.after(()=>f.pool.stop());
+  await f.pool.start(f.tasks.map(t=>t.id),1.5,{concurrency:2,muted:true});
+  await until(()=>f.pool.state.items.filter(i=>i.status==='playing').length===2);
+  assert.ok(f.lanes.every(l=>l.muted));assert.equal(f.pool.plan().muted,true);
+  await f.pool.pause();await f.pool.setMuted(false);
+  assert.ok(f.lanes.every(l=>!l.muted));assert.equal(f.pool.state.items[2].muted,false);
+  assert.equal(f.pool.plan().muted,false);
+  f.pool.resume();await until(()=>f.lanes.every(l=>!l.paused));
+  f.lanes[0].done=true;await until(()=>f.lanes.length===3&&f.pool.state.items[2].status==='playing');
+  assert.equal(f.lanes[2].muted,false);
+  await f.pool.setMuted(true);assert.ok([...f.pool.active.values()].every(x=>x.lane.muted));
+  await assert.rejects(f.pool.setMuted('true'),/静音/);
+  await f.pool.stop();
 });
 test('stop during policy loading cancels startup before a video is opened',async()=>{
   const f=fixture(2);let release;

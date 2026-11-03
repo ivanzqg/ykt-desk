@@ -1,7 +1,7 @@
 const $ = id => document.getElementById(id);
 const extensionMode = typeof chrome !== 'undefined' && !!chrome.runtime?.id;
 const escape = text => String(text ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-let data = null, selectedCourse = null, filter = 'all', search = '', selected = new Set(), busy = false, changingSpeed = false;
+let data = null, selectedCourse = null, filter = 'all', search = '', selected = new Set(), busy = false, changingSpeed = false, changingMuted = false;
 const statusLabels = {pending:'未完成',unknown:'待核对',completed:'已完成',queued:'已排队',loading:'加载中',playing:'播放中',paused:'已暂停',verifying:'核对中',waiting_focus:'等待播放页',needs_attention:'等待处理',skipped:'已跳过',stopped:'已停止',failed:'失败'};
 const queueLabels = {idle:'未开始',running:'进行中',paused:'已暂停',waiting_focus:'等待播放页',needs_attention:'等待处理',stopping:'停止中',stopped:'已停止',finished:'已结束'};
 const typeLabels = {0:'视频',1:'音频',2:'直播',3:'图文',4:'讨论',5:'练习',6:'作业',7:'课件',8:'课堂',9:'其他'};
@@ -57,6 +57,11 @@ function render() {
   $('connectButton').textContent=connected?'重新连接':'连接浏览器';
   $('connectButton').disabled=busy||activeQueue()||data.syncing;
   $('openBrowser').disabled=busy||activeQueue()||data.syncing;
+  $('platformSelect').value=data.platform||'school';
+  $('platformSelect').disabled=busy||activeQueue()||data.syncing;
+  $('platformNote').hidden=data.platform!=='official';
+  $('openSchoolLogin').disabled=busy||activeQueue()||data.syncing;
+  $('openBrowser').textContent=data.platform==='official'?'打开雨课堂版登录页':'打开校园版登录页';
   $('syncButton').disabled=busy||!connected||data.syncing;
   $('syncButton').textContent=data.syncing?'↻ 正在同步…':'↻ 同步课程';
   $('cacheBanner').hidden=!data.cacheOnly;
@@ -102,7 +107,7 @@ function render() {
   $('playerPolicy').textContent=queue.mode==='background'?'每个视频在独立后台播放会话中实际播放，切换标签后继续。平台确认完成后才更新状态；登录或验证提示仍需手动处理。':queue.requiresForeground===true?'此课程要求播放窗口保持焦点。切换标签、操作其他窗口或最小化会暂停；返回播放页后从原位置继续。':'前台模式按原播放器要求播放，完成状态以服务器返回为准。';
   $('queueList').innerHTML=queue.items.map((i,index)=>{
     const live=(queue.activeIds||[queue.activeId]).includes(i.id);
-    return `<li class="${live?'active':''}"><span class="index">${String(index+1).padStart(2,'0')}</span><div>${escape(i.name)}<small>${escape(i.courseName)}</small>${i.duration?`<small>${time(i.position)} / ${time(i.duration)} · ${i.speed}×</small><small>服务器覆盖率 ${i.coverage===null?'等待读取':(i.coverage*100).toFixed(1)+'%'}</small>`:''}${i.message&&['needs_attention','failed'].includes(i.status)?`<small class="task-error">${escape(i.message)}</small>`:''}${live?`<div class="task-actions"><button class="text-button" data-focus="${i.id}">打开</button>${['needs_attention','waiting_focus'].includes(i.status)?`<button class="text-button" data-resume="${i.id}">继续</button>`:''}<button class="text-button" data-skip="${i.id}">跳过</button></div>`:''}</div>${badge(live&&queue.status==='paused'?'paused':i.status,false)}</li>`;
+    return `<li class="${live?'active':''}"><span class="index">${String(index+1).padStart(2,'0')}</span><div>${escape(i.name)}<small>${escape(i.courseName)}</small>${i.duration?`<small>${time(i.position)} / ${time(i.duration)} · ${i.speed}×${i.muted?' · 静音':''}</small><small>服务器覆盖率 ${i.coverage===null?'等待读取':(i.coverage*100).toFixed(1)+'%'}</small>`:''}${i.message&&['needs_attention','failed'].includes(i.status)?`<small class="task-error">${escape(i.message)}</small>`:''}${live?`<div class="task-actions"><button class="text-button" data-focus="${i.id}">打开</button>${['needs_attention','waiting_focus'].includes(i.status)?`<button class="text-button" data-resume="${i.id}">继续</button>`:''}<button class="text-button" data-skip="${i.id}">跳过</button></div>`:''}</div>${badge(live&&queue.status==='paused'?'paused':i.status,false)}</li>`;
   }).join('');
   $('startQueue').hidden=activeQueue();
   $('startQueue').disabled=busy||!connected||data.cacheOnly||!selected.size||data.syncing;
@@ -118,6 +123,8 @@ function render() {
   $('concurrencySelect').disabled=activeQueue()||$('playbackMode').value==='foreground';
   if(activeQueue()){$('playbackMode').value=queue.mode||'foreground';$('concurrencySelect').value=String(queue.concurrency||1);}
   if(activeQueue()&&!changingSpeed)$('speedSelect').value=String(queue.speed);
+  $('muteVideos').disabled=busy||queue.status==='stopping';
+  if(activeQueue()&&!changingMuted)$('muteVideos').checked=queue.muted===true;
 }
 $('courseList').addEventListener('click',e=>{const b=e.target.closest('[data-course]');if(b){selectedCourse=Number(b.dataset.course);render();}});
 $('navCourses').onclick=()=>{selectedCourse=null;render();};
@@ -128,18 +135,21 @@ $('taskRows').onchange=e=>{const id=e.target.dataset.task;if(id){e.target.checke
 $('taskRows').onclick=e=>{const b=e.target.closest('[data-open]');if(b)action(()=>api('/api/task/open',{id:b.dataset.open}));};
 $('selectAll').onchange=e=>{visibleTasks().filter(selectable).forEach(t=>e.target.checked?selected.add(t.id):selected.delete(t.id));render();};
 $('clearSelection').onclick=()=>{selected.clear();render();};
+$('platformSelect').onchange=()=>{const platform=$('platformSelect').value;action(async()=>{data=await api('/api/platform',{platform});toast(`已选择${platform==='official'?'雨课堂版':'校园版'}，登录页、视频和作业将使用此版本。`);});};
 $('openBrowser').onclick=()=>action(async()=>{const result=await api('/api/browser/open');$('endpoint').value=result.endpoint;toast('已打开雨课堂。请手动登录，再点击连接浏览器。');});
+$('openSchoolLogin').onclick=()=>action(async()=>{const result=await api('/api/browser/open',{platform:'school'});$('endpoint').value=result.endpoint;toast('已打开校园版，请手动登录后返回学习台。');});
 $('connectButton').onclick=()=>action(async()=>{await api('/api/connect',{endpoint:$('endpoint').value});await api('/api/sync');toast('课程与待办已同步');});
 $('syncButton').onclick=()=>action(()=>api('/api/sync'));
 $('refreshCourse').onclick=()=>action(()=>api('/api/course/refresh',{id:selectedCourse}));
-$('startQueue').onclick=()=>action(async()=>{const ids=[...selected];await api('/api/queue/start',{ids,speed:Number($('speedSelect').value),mode:$('playbackMode').value,concurrency:Number($('concurrencySelect').value)});selected.clear();});
+$('startQueue').onclick=()=>action(async()=>{const ids=[...selected];await api('/api/queue/start',{ids,speed:Number($('speedSelect').value),mode:$('playbackMode').value,concurrency:Number($('concurrencySelect').value),muted:$('muteVideos').checked});selected.clear();});
 for(const [id,verb] of [['pauseQueue','pause'],['resumeQueue','resume'],['stopQueue','stop'],['skipVideo','skip']])$(id).onclick=()=>action(()=>api('/api/queue/'+verb));
 $('focusPlayer').onclick=()=>action(()=>api('/api/player/focus'));
 $('stopService').onclick=()=>action(async()=>{await api('/api/service/stop');if(!extensionMode){events.close();$('connectionChip').innerHTML='<i></i>工具已退出';}toast(extensionMode?'已断开连接，工具创建的视频标签已关闭。':'服务已停止，工具创建的视频已暂停。');});
 $('playbackMode').onchange=()=>{if($('playbackMode').value==='foreground')$('concurrencySelect').value='1';render();};
 $('queueList').onclick=e=>{const button=e.target.closest('button');if(!button)return;if(button.dataset.focus)action(()=>api('/api/player/focus',{id:button.dataset.focus}));if(button.dataset.skip)action(()=>api('/api/queue/skip',{id:button.dataset.skip}));if(button.dataset.resume)action(()=>api('/api/queue/resume',{id:button.dataset.resume}));};
 $('speedSelect').onchange=()=>{if(activeQueue()){changingSpeed=true;action(async()=>{try{await api('/api/queue/speed',{speed:Number($('speedSelect').value)});}finally{changingSpeed=false;}});}};
-async function init(){try{data=extensionMode?await api('/api/state'):await(await fetch('/api/state')).json();$('endpoint').value=data.connection.endpoint;if(data.restoredPlan&&!activeQueue()){selected=new Set(data.restoredPlan.ids.filter(id=>data.courses.some(c=>c.tasks.some(t=>t.id===id&&selectable(t)))));$('playbackMode').value=data.restoredPlan.mode||'background';$('concurrencySelect').value=String(data.restoredPlan.concurrency||2);$('speedSelect').value=String(data.restoredPlan.speed||1.5);}render();}catch{toast(extensionMode?'插件后台未连接，请重新打开学习台':'本地服务未连接，请重新启动工具');}}
+$('muteVideos').onchange=()=>{if(activeQueue()){const muted=$('muteVideos').checked;changingMuted=true;action(async()=>{try{data=await api('/api/queue/mute',{muted});}finally{changingMuted=false;}});}};
+async function init(){try{data=extensionMode?await api('/api/state'):await(await fetch('/api/state')).json();$('endpoint').value=data.connection.endpoint;if(data.restoredPlan&&!activeQueue()){selected=new Set(data.restoredPlan.ids.filter(id=>data.courses.some(c=>c.tasks.some(t=>t.id===id&&selectable(t)))));$('playbackMode').value=data.restoredPlan.mode||'background';$('concurrencySelect').value=String(data.restoredPlan.concurrency||2);$('speedSelect').value=String(data.restoredPlan.speed||1.5);$('muteVideos').checked=data.restoredPlan.muted===true;}render();}catch{toast(extensionMode?'插件后台未连接，请重新打开学习台':'本地服务未连接，请重新启动工具');}}
 function extensionEvents() {
   const events = {close(){port?.disconnect();clearTimeout(retry);},onmessage:null,onerror:null};
   let port, retry;

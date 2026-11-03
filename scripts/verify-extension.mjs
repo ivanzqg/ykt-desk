@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { EXTENSION_FILES, validateManifest } from './extension-package.mjs';
+import { MAX_CONCURRENCY } from '../app/pool.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'dist', 'chrome-extension');
@@ -30,6 +31,9 @@ assert.equal(manifest.version, pkg.version);
 const html = text('index.html');
 assert.ok(!html.includes('__LOCAL_TOKEN__') && !html.includes('http://[::1]:9222') && !html.includes('class="advanced"'));
 assert.ok(html.includes('断开连接') && html.includes('id="endpoint" type="hidden"'));
+const concurrencyOptions=html.match(/<select id="concurrencySelect">([\s\S]*?)<\/select>/)?.[1] || '';
+assert.deepEqual([...concurrencyOptions.matchAll(/<option value="(\d+)"/g)].map(m=>Number(m[1])),Array.from({length:MAX_CONCURRENCY},(_,i)=>i+1),'网页与后台的并发范围不一致');
+assert.ok(html.includes('id="platformSelect"') && html.includes('value="official"') && html.includes('id="muteVideos"'),'插件缺少页面版本或静音选项');
 for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) assert.ok(files[match[1]], '缺少网页资源：'+match[1]);
 const worker = text('service-worker.js');
 assert.ok(!/\b(?:from\s*['"]node:|require\s*\(|process\.|fetch\(['"]http:\/\/)/.test(worker), '插件后台包含 Node 或本地服务依赖');

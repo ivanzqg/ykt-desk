@@ -1,6 +1,6 @@
 import { ExtensionBrowser, recoverOwnedTabs } from './browser.mjs';
-import { SCHOOL, SPEEDS } from '../app/browser-core.mjs';
-import { PlaybackPool } from '../app/pool.mjs';
+import { SPEEDS, PLATFORMS, validatePlatform, loginUrl, taskUrl } from '../app/browser-core.mjs';
+import { PlaybackPool, MAX_CONCURRENCY } from '../app/pool.mjs';
 import { mapCourse, mergeCourse } from '../app/data.mjs';
 
 const bridge = new ExtensionBrowser();
@@ -13,7 +13,7 @@ function findTask(id) {
   return null;
 }
 function state() {
-  return {connection:{...connection, connected:bridge.connected}, courses, syncing, syncMessage, lastSync, cacheOnly, queue:queue.state, supportedSpeeds:SPEEDS, restoredPlan};
+  return {connection:{...connection, connected:bridge.connected}, platform:bridge.platform, maxConcurrency:MAX_CONCURRENCY, courses, syncing, syncMessage, lastSync, cacheOnly, queue:queue.state, supportedSpeeds:SPEEDS, restoredPlan};
 }
 function broadcast() {
   const value = state();
@@ -32,10 +32,11 @@ const ready = (async () => {
   await chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
   await chrome.storage.session.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});
   const recovered = await recoverOwnedTabs();
-  const stored = await chrome.storage.local.get(['courses', 'lastSync', 'restoredPlan']);
+  const stored = await chrome.storage.local.get(['courses', 'lastSync', 'restoredPlan', 'platform']);
   courses = stored.courses || [];
   lastSync = stored.lastSync || null;
   restoredPlan = stored.restoredPlan || null;
+  if (Object.hasOwn(PLATFORMS, stored.platform)) bridge.platform = stored.platform;
   if (recovered) connection.message = '已关闭上次中断的播放标签。请重新连接、同步后开始';
 })();
 // Register listeners synchronously so MV3 events can wake the service worker.
@@ -113,8 +114,16 @@ async function syncAll() {
 }
 async function dispatch(route, input) {
   if (route === '/api/state') return state();
+  if (route === '/api/platform') {
+    const platform = validatePlatform(input.platform);
+    if (queue.runner || queue.starting || syncing || exiting || connecting) throw new Error('请先停止播放并等待同步结束，再切换页面版本');
+    bridge.platform = platform;
+    await save({platform});
+    broadcast();
+    return state();
+  }
   if (route === '/api/browser/open') {
-    await chrome.tabs.create({url:`${SCHOOL}/pro/`, active:true});
+    await chrome.tabs.create({url:loginUrl(input.platform ?? bridge.platform), active:true});
     return {endpoint:''};
   }
   if (route === '/api/connect') {
@@ -132,13 +141,13 @@ async function dispatch(route, input) {
   if (route === '/api/course/refresh') return refreshCourse(input.id, true);
   if (route === '/api/task/open') {
     const found = findTask(input.id); if (!found) throw new Error('未找到任务');
-    await bridge.openTask(found.task.url || `${SCHOOL}/pro/lms/${encodeURIComponent(found.course.sign)}/${found.course.id}/studycontent`);
+    await bridge.openTask(taskUrl(found.course, found.task, bridge.platform));
     return {ok:true};
   }
   if (route === '/api/queue/start') {
     if (!bridge.connected || cacheOnly || exiting) throw new Error('请连接并同步最新课程后开始');
     if (syncing) throw new Error('请等待课程同步完成');
-    await queue.start(input.ids, Number(input.speed), {mode:input.mode || 'background', concurrency:Number(input.concurrency || 2)});
+    await queue.start(input.ids, Number(input.speed), {mode:input.mode || 'background', concurrency:Number(input.concurrency ?? 2), muted:input.muted ?? false});
     return state();
   }
   if (route === '/api/queue/pause') await queue.pause();
@@ -146,6 +155,7 @@ async function dispatch(route, input) {
   else if (route === '/api/queue/stop') await queue.stop();
   else if (route === '/api/queue/skip') await queue.skip(input.id);
   else if (route === '/api/queue/speed') await queue.setSpeed(Number(input.speed));
+  else if (route === '/api/queue/mute') await queue.setMuted(input.muted);
   else if (route === '/api/player/focus') await queue.focusPlayer(input.id);
   else if (route === '/api/service/stop') {
     if (syncing || queue.starting || exiting || connecting) throw new Error('请等待当前同步或启动操作结束，再断开连接');
