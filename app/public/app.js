@@ -28,6 +28,7 @@ function taskState(task) {
   return task.status;
 }
 function selectable(task) {
+  if(data.courses.find(c=>c.id===task.courseId)?.error)return false;
   if(activeQueue()&&data.queue.items.some(i=>i.id===task.id))return false;
   return task.type===0 && !task.expired && !['completed','unknown','queued','loading','playing','paused','verifying','waiting_focus','needs_attention'].includes(taskState(task));
 }
@@ -81,9 +82,13 @@ function render() {
   $('refreshCourse').hidden=!course;
   $('refreshCourse').disabled=busy||!connected;
   if(course?.error)$('courseSubtitle').textContent+=` · ${course.error}`;
+  if(course?.lmsAvailable===false)$('courseSubtitle').textContent+=' · 此课程未配置线上学习单元';
   const visible=visibleTasks();
   $('taskRows').innerHTML=visible.map(t=>`<tr><td><input type="checkbox" data-task="${t.id}" aria-label="选择 ${escape(t.name)}" ${selected.has(t.id)?'checked':''} ${!busy&&selectable(t)?'':'disabled'}></td><td><div class="task-title">${escape(t.name==='作业'&&t.section?t.section+' · 作业':t.name)}</div><div class="task-meta"><span class="task-type ${[5,6].includes(t.type)?'assignment':''}">${typeLabels[t.type]||'任务'}</span>${escape(t.courseName)}${t.name==='作业'&&!t.section?' · '+t.leafId:''}</div></td><td class="deadline ${t.expired?'expired':''}">${escape(formatDate(t))}</td><td>${badge(taskState(t),t.expired)}</td><td><button class="open-task" data-open="${t.id}" aria-label="打开 ${escape(t.name)}" title="在雨课堂中打开" ${connected?'':'disabled'}>↗</button></td></tr>`).join('');
   $('emptyState').hidden=visible.length>0;
+  const emptyError=course?.error||(data.cacheOnly?data.connection.message:'');
+  $('emptyTitle').textContent=emptyError?'课程数据尚未同步':course?.lmsAvailable===false?'此课程未配置线上学习任务':'这里暂时没有待办';
+  $('emptyDescription').textContent=emptyError||'可以切换课程或任务类型，查看其他学习内容。';
   $('taskCount').textContent=`${visible.length} 项任务`;
   $('lastSync').textContent=data.lastSync?`最近同步 ${new Date(data.lastSync).toLocaleString('zh-CN',{timeZone:'Asia/Shanghai',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})}`:'尚未同步';
   const selectableTasks=visible.filter(selectable);

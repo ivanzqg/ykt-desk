@@ -63,7 +63,7 @@ export class BrowserBridge extends BrowserCore {
     const info = await response.json();
     if (!/^Chrome\//.test(info.Browser || '') || /Electron|UGit/.test(info['User-Agent'] || '')) throw new Error('这个端口不是 Chrome 浏览器，请检查连接地址');
     const next = await Cdp.open(info.webSocketDebuggerUrl);
-    await this.close(); this.cdp = next; this.endpoint = safe; this.studentIds.clear();
+    await this.close(); this.cdp = next; this.endpoint = safe; this.studentIds.clear(); this.courseContexts.clear(); this.courseDetails.clear();
     this.dataPage = null; this.playerPage = null;
     const url = loginUrl(this.platform);
     this.dataPage = await this.newPage(url);

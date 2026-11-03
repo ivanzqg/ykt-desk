@@ -42,7 +42,7 @@
           <div class="toolbar"><div class="filters" id="taskFilters"><button data-filter="all" class="selected">全部</button><button data-filter="video">视频</button><button data-filter="assignment">作业 / 练习</button><button data-filter="completed">已完成</button></div><label class="search"><span>⌕</span><input id="search" placeholder="搜索任务或课程" aria-label="搜索任务"></label></div>
           <div class="selection-bar"><label><input type="checkbox" id="selectAll">选择本页可播放视频</label><button class="text-button" id="selectAllVideos">多选全部课程视频</button><span id="selectionCount">未选择</span><button class="text-button" id="clearSelection">清空选择</button></div>
           <div class="table-wrap"><table><thead><tr><th class="check-col"></th><th>学习任务</th><th>截止时间</th><th>状态</th><th></th></tr></thead><tbody id="taskRows"></tbody></table></div>
-          <div class="empty" id="emptyState" hidden><div>✓</div><h3>这里暂时没有待办</h3><p>可以切换课程或任务类型，查看其他学习内容。</p></div>
+          <div class="empty" id="emptyState" hidden><div>✓</div><h3 id="emptyTitle">这里暂时没有待办</h3><p id="emptyDescription">可以切换课程或任务类型，查看其他学习内容。</p></div>
           <footer class="panel-footer"><span id="taskCount">0 项任务</span><span id="lastSync">尚未同步</span></footer>
         </section>
         <aside class="player-panel">

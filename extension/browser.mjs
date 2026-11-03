@@ -91,6 +91,7 @@ export class ExtensionBrowser extends BrowserCore {
     this.cdp = new ChromeTransport(globalThis.chrome, onLost);
     this.background = true;
     this.studentIds.clear();
+    this.courseContexts.clear(); this.courseDetails.clear();
     try {
       const url = loginUrl(this.platform);
       this.dataPage = await this.newPage(url);

@@ -30,7 +30,8 @@ html = html.replace(/\s*<meta name="local-token"[^>]+>/,'')
   .replace('本地学习工具','Chrome 学习插件')
   .replace('在 Chrome 中手动登录，然后连接学习台。','选择页面版本，在当前 Chrome 中手动登录后连接学习台。')
   .replace('只在本机运行 · 手动登录','Chrome 插件 · 手动登录');
-const instructions = await readFile(path.join(root, 'docs/chrome-extension.md'));
+const instructions = Buffer.from((await readFile(path.join(root, 'docs/chrome-extension.md'),'utf8'))
+  .replace('(platform-api.md)','(https://github.com/ivanzqg/ykt-desk/blob/master/docs/platform-api.md)'));
 const files = {
   'manifest.json':Buffer.from(JSON.stringify(manifest, null, 2)+'\n'),
   'service-worker.js':result.outputFiles[0].contents,

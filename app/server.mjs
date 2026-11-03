@@ -86,10 +86,10 @@ async function syncAll() {
       }
     }
     await Promise.all([worker(),worker()]);
-    lastSync = new Date().toISOString(); cacheOnly = false;
+    lastSync = new Date().toISOString(); cacheOnly = courses.length>0&&failed===courses.length;
     connection.loginRequired = false; connection.message = '已连接雨课堂';
     syncMessage = failed ? `${failed} 门课程未同步成功，可单独重试` : '课程与待办已更新'; save();
-  } catch (error) { connection.loginRequired = true; connection.message = error.message; throw error; }
+  } catch (error) { connection.loginRequired = /登录/.test(error.message); connection.message = error.message; throw error; }
   finally { syncing = false; broadcast(); }
 }
 async function body(request) {

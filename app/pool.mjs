@@ -58,7 +58,7 @@ export class PlaybackPool {
   makeItems(ids,speed,muted) {
     return ids.map(id=>{
       const found=this.findTask(id);
-      if(!found || found.task.type!==0 || found.task.expired || ['completed','unknown'].includes(found.task.status))throw new Error('请选择当前课程中未完成且未超时的视频');
+      if(!found || found.course.error || found.task.type!==0 || found.task.expired || ['completed','unknown'].includes(found.task.status))throw new Error('请选择已同步成功课程中未完成且未超时的视频');
       return {id,courseId:found.course.id,name:found.task.name,courseName:found.course.name,status:'queued',position:0,duration:0,coverage:null,speed,muted,message:''};
     });
   }

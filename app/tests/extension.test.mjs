@@ -56,7 +56,8 @@ function fakeChrome(stored = {}) {
               calls.push(['fetch', route, options, new URL(tab.url).origin]);
               const response = api.responses.get(route);
               if (!response) throw new Error('No response fixture: '+route);
-              return {ok:true,status:200,json:async()=>structuredClone(response)};
+              const status=response.httpStatus||200;
+              return {ok:status>=200&&status<300,status,json:async()=>{if(response.invalidJson)throw new Error('Invalid JSON');return structuredClone(response);}};
             },
           });
           return {result:{value}};
@@ -183,11 +184,11 @@ test('platform choice controls the connection and API origin and invalidates old
   const chosen=await f.action('/api/platform',{platform:'official'});
   assert.equal(chosen.platform,'official');assert.equal(chosen.maxConcurrency,16);assert.equal(f.local.platform,'official');
   await f.action('/api/browser/open');
-  assert.equal([...f.tabs.values()][0].url,'https://pro.yuketang.cn/v2/web');
+  assert.equal([...f.tabs.values()][0].url,'https://pro.yuketang.cn/v2/web/index');
   await f.action('/api/connect');
   const dataTab=[...f.tabs.values()].find(t=>f.attached.has(t.id));
   assert.equal(new URL(dataTab.url).origin,'https://pro.yuketang.cn');
-  f.api.responses.set('/mooc-api/v1/lms/user/user-courses/?status=1&page=1&no_page=1&no_term=true&uv_id=2598',{data:{count:0,product_list:[]}});
+  f.api.responses.set('/v2/api/web/courses/list?identity=2',{errcode:0,data:{list:[]}});
   const synced=await f.action('/api/sync');assert.equal(synced.cacheOnly,false);
   assert.equal(f.calls.find(c=>c[0]==='fetch')[3],'https://pro.yuketang.cn');
   const changed=await f.action('/api/platform',{platform:'school'});
@@ -225,6 +226,57 @@ test('school-authenticated tabs are not used for official platform requests',asy
   await assert.rejects(f.action('/api/sync'),/所选版本/);
   assert.equal(f.calls.filter(c=>c[0]==='fetch').length,0);
   await f.action('/api/service/stop');
+});
+test('official native catalog and classroom details supply the SKU and scoped student requests',async t=>{
+  const f=await workerFixture({platform:'official'});t.after(()=>f.action('/api/service/stop'));
+  f.api.responses.set('/v2/api/web/courses/list?identity=2',{errcode:0,data:{list:[
+    {classroom_id:1,name:'课程班级',role:5,course:{id:2,name:'官方课程',university_id:2990,platform:3}},
+    {classroom_id:9,name:'普通课堂',role:6,course:{id:8,name:'无线上单元',university_id:0,platform:3}},
+  ]}});
+  f.api.responses.set('/v2/api/web/classrooms/1?role=5',{errcode:0,data:{course_id:2,free_sku_id:3,uv_id:2990,platform:3,course_sign:'sign'}});
+  f.api.responses.set('/v2/api/web/classrooms/9?role=5',{errcode:0,data:{course_id:8,uv_id:0,platform:3}});
+  f.api.responses.set('/c27/online_courseware/course/classroom/1/3/study_stat/?term=latest&uv_id=2990',{success:true,data:{study_progress:12,unit_progress:{completed:0,total:1},unfinished:{total:1}}});
+  f.api.responses.set('/c27/online_courseware/course/classroom/1/3/todo_list/?client_type=web&term=latest&uv_id=2990',{success:true,data:{count:{total:1},result:[{leaf_id:4,name:'视频',type:0}]}});
+  f.api.responses.set('/c27/api/v1/platfrom/watermark?uv_id=2990&classroom_id=1',{success:true,data:{video_multiple_play_disabled:false}});
+  f.api.responses.set('/mooc-api/v1/lms/learn/leaf_info/1/4/',{success:true,data:{user_id:7}});
+  f.api.responses.set('/video-log/get_video_watch_progress/?cid=2&user_id=7&classroom_id=1&video_type=video&vtype=rate&video_id=4&snapshot=1&no_loading=true',{success:true,data:{4:{completed:1,rate:1}}});
+  await f.action('/api/connect');const synced=await f.action('/api/sync');
+  assert.equal(synced.courses.length,2);assert.equal(synced.courses[0].skuId,3);assert.equal(synced.courses[0].universityId,2990);
+  assert.equal(synced.courses[0].name,'官方课程');assert.equal(synced.courses[0].tasks[0].id,'1:4');
+  assert.equal(synced.courses[1].lmsAvailable,false);assert.equal(synced.courses[1].error,null);
+  const catalog=f.calls.find(c=>c[0]==='fetch');
+  assert.equal(catalog[1],'/v2/api/web/courses/list?identity=2');assert.equal(catalog[2].headers.xtbz,'ykt');assert.equal(catalog[2].headers['university-id'],'0');
+  const scoped=f.calls.find(c=>c[0]==='fetch'&&c[1].includes('/todo_list/'));
+  assert.equal(scoped[2].headers.xtbz,'ykt');assert.equal(scoped[2].headers['university-id'],'2990');assert.equal(scoped[2].headers['classroom-id'],'1');
+  assert.equal(scoped[2].headers['Xt-Agent'],'web');assert.equal(scoped[3],'https://pro.yuketang.cn');
+  assert.equal(f.calls.filter(c=>c[0]==='fetch'&&c[1].includes('user-courses')).length,0);
+  await f.action('/api/queue/enqueue',{ids:['1:4'],speed:1.5,concurrency:2,muted:true});
+  await until(()=>f.local.restoredPlan?.ids.length===0);
+  assert.equal((await f.action('/api/state')).queue.items[0].status,'completed');
+});
+test('official catalog failures retain cached courses, block playback, and identify authentication versus API errors',async t=>{
+  const cached=[{id:1,name:'缓存课程',courseId:2,skuId:3,tasks:[{id:'1:4',type:0,status:'pending'}]}];
+  const f=await workerFixture({platform:'official',courses:cached});t.after(()=>f.action('/api/service/stop'));
+  await f.action('/api/connect');
+  f.api.responses.set('/v2/api/web/courses/list?identity=2',{errcode:10005,errmsg:'请求参数不正确'});
+  await assert.rejects(f.action('/api/sync'),/10005.*参数/);
+  let state=await f.action('/api/state');assert.equal(state.cacheOnly,true);assert.equal(state.courses[0].name,'缓存课程');assert.equal(state.connection.loginRequired,false);
+  await assert.rejects(f.action('/api/queue/enqueue',{ids:['1:4'],speed:1}),/同步最新/);
+  f.api.responses.set('/v2/api/web/courses/list?identity=2',{httpStatus:401});
+  await assert.rejects(f.action('/api/sync'),/HTTP 401.*登录/);
+  state=await f.action('/api/state');assert.equal(state.connection.loginRequired,true);
+  f.api.responses.set('/v2/api/web/courses/list?identity=2',{invalidJson:true});
+  await assert.rejects(f.action('/api/sync'),/未返回课程数据/);
+});
+test('when every classroom refresh fails, cached tasks are not allowed to start',async t=>{
+  const f=await workerFixture({courses:[{id:1,courseId:2,skuId:3,tasks:[{id:'1:4',type:0,status:'pending'}]}]});
+  t.after(()=>f.action('/api/service/stop'));
+  f.api.responses.set('/mooc-api/v1/lms/user/user-courses/?status=1&page=1&no_page=1&no_term=true&uv_id=2598',{data:{count:1,product_list:[{classroom_id:1,course_id:2,sku_id:3,course_name:'课程'}]}});
+  f.api.responses.set('/c27/online_courseware/course/classroom/1/3/study_stat/?term=latest&uv_id=2598',{httpStatus:403});
+  f.api.responses.set('/c27/online_courseware/course/classroom/1/3/todo_list/?client_type=web&term=latest&uv_id=2598',{httpStatus:403});
+  await f.action('/api/connect');const state=await f.action('/api/sync');
+  assert.equal(state.cacheOnly,true);assert.match(state.courses[0].error,/HTTP 403/);
+  await assert.rejects(f.action('/api/queue/enqueue',{ids:['1:4'],speed:1}),/同步最新/);
 });
 test('restored official tasks can be opened without implicitly opening a school page',async()=>{
   const task={id:'1:5',type:6,url:'https://tsinghua.yuketang.cn/ai-workspace/lms-graph/1/exercise/5?node_id=7'};

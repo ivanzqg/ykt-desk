@@ -6,7 +6,7 @@
 
 ## Chrome 插件安装与使用
 
-1. 打开 [GitHub Actions](https://github.com/ivanzqg/ykt-desk/actions/workflows/chrome-extension.yml)，选择成功的运行，下载 `yuketang-chrome-*` artifact，解压其中的 `YuketangStudyDesk-1.2.0-chrome.zip`。
+1. 打开 [GitHub Actions](https://github.com/ivanzqg/ykt-desk/actions/workflows/chrome-extension.yml)，选择成功的运行，下载 `yuketang-chrome-*` artifact，解压其中的 `YuketangStudyDesk-1.2.1-chrome.zip`。
 2. 使用 Chrome 118+，打开 `chrome://extensions`，开启“开发者模式”，点击“加载已解压的扩展程序”，选择包含 `manifest.json` 的目录。
 3. 点击工具栏的“雨课堂学习台”打开管理页面，通过“页面版本”选择校园版或雨课堂版，登录后点击“连接浏览器”。登录、连接页和课程接口均使用所选域名；切换版本会断开旧连接，需重新连接、同步。
 4. 勾选多个视频，或用“多选全部课程视频”选择当前学期筛选范围中的可播放任务，设置倍速、1–16并发及“视频静音”，点击“加入队列并开始”。超过并发上限的任务会排队，前面的任务完成或跳过后自动补位。
@@ -67,7 +67,9 @@ npm test
 npm run check
 ```
 
-当前支持的域名为 `tsinghua.yuketang.cn` 和 `pro.yuketang.cn`，课程请求保留机构2598、平台3的上下文。课程与待办接口来自已保存的REA观察，接口可用性还取决于所选域名的有效登录。只读平台验证脚本为 `node app/tests/verify-platform-live.mjs`，它创建临时后台页并读取课程列表，不播放视频。此次验证确认两版连接地址正确，但旧登录会话均失效，未完成真实课程列表比较。
+当前支持的域名为 `tsinghua.yuketang.cn` 和 `pro.yuketang.cn`。校园版使用学校LMS课程列表及 `xtbz: cloud`；雨课堂版使用原生学生课程列表及 `xtbz: ykt`，从每门课的详情取得SKU、学校和平台上下文。未配置线上单元的课堂仍列出，但显示没有线上任务。接口差异和验证范围见 [平台接口说明](docs/platform-api.md)。
+
+只读平台验证脚本为 `node app/tests/verify-platform-live.mjs`，它创建临时后台页并读取课程列表，不播放视频。此次旧调试Chrome会话在官方原生接口返回HTTP401，真实课程同步还需要使用有效登录验证；这不代表用户其他Chrome配置中的登录状态失效。同步失败会保留缓存、显示接口错误并禁止使用旧任务开始播放。
 
 实际浏览器回归脚本：`node app/tests/verify-background-live.mjs`。它短时播放会计学6067660、6067661两段视频，验证后台并行、暂停/继续和服务器覆盖率后停止。脚本会产生真实观看记录；结果保存到`.local/background-verification.json`，不代表完成整段视频。
 

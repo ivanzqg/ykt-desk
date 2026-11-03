@@ -1,3 +1,5 @@
+import {OFFICIAL_CATALOG,officialCourseRows,officialCourseDetails} from './platform-data.mjs';
+
 export const SCHOOL = 'https://tsinghua.yuketang.cn';
 export const OFFICIAL = 'https://pro.yuketang.cn';
 const ORIGINS = new Set([SCHOOL, OFFICIAL]);
@@ -9,7 +11,7 @@ export function validatePlatform(platform) {
 }
 export function loginUrl(platform = 'school') {
   validatePlatform(platform);
-  return platform === 'school' ? `${SCHOOL}/pro/` : `${OFFICIAL}/v2/web`;
+  return platform === 'school' ? `${SCHOOL}/pro/` : `${OFFICIAL}/v2/web/index`;
 }
 export function validatePageUrl(value) {
   const url = new URL(value);
@@ -28,7 +30,7 @@ export function courseUrl(course, platform = 'school') {
   validatePlatform(platform);
   return platform === 'school'
     ? `${SCHOOL}/pro/lms/${encodeURIComponent(course.sign)}/${course.id}/studycontent`
-    : `${OFFICIAL}/v2/web/studentLog/${course.id}?university_id=2598&platform_id=3&classroom_id=${course.id}&content_url=`;
+    : `${OFFICIAL}/v2/web/studentLog/${course.id}?university_id=${course.universityId??2598}&platform_id=${course.platformId??3}&classroom_id=${course.id}&content_url=`;
 }
 export function taskUrl(course, task, platform = 'school') {
   if (task.url) {
@@ -46,7 +48,7 @@ export function videoUrl(course, task, platform) {
 }
 
 export class BrowserCore {
-  constructor() { this.cdp = null; this.dataPage = null; this.playerPage = null; this.playerPolicy = null; this.studentIds = new Map(); this.endpoint = 'http://[::1]:9222'; this.platform = 'school'; this.muted = false; this.background = false; this.ownsConnection = true; this.lanes = new Set(); }
+  constructor() { this.cdp = null; this.dataPage = null; this.playerPage = null; this.playerPolicy = null; this.studentIds = new Map(); this.courseContexts = new Map(); this.courseDetails = new Map(); this.endpoint = 'http://[::1]:9222'; this.platform = 'school'; this.muted = false; this.background = false; this.ownsConnection = true; this.lanes = new Set(); }
   get connected() { return this.cdp?.connected === true; }
   async newPage(url) {
     validatePageUrl(url);
@@ -62,11 +64,13 @@ export class BrowserCore {
     lane.cdp = this.cdp; lane.dataPage = this.dataPage; lane.studentIds = this.studentIds;
     lane.endpoint = this.endpoint; lane.background = mode === 'background'; lane.ownsConnection = false;
     lane.platform = this.platform;
+    lane.courseContexts = this.courseContexts; lane.courseDetails = this.courseDetails;
     this.lanes.add(lane);
     return lane;
   }
   async playbackPolicy(courseId) {
-    const policy = await this.api(`/c27/api/v1/platfrom/watermark?uv_id=2598&classroom_id=${courseId}`,courseId);
+    const context=this.context(courseId);
+    const policy = await this.api(`/c27/api/v1/platfrom/watermark?uv_id=${context.universityId}&classroom_id=${courseId}`,courseId);
     return { requiresForeground:policy.anti_brushing === true, multiplePlayAllowed:policy.video_multiple_play_disabled !== true };
   }
   async evaluate(page, expression) {
@@ -85,37 +89,66 @@ export class BrowserCore {
     }
     throw new Error('页面加载超时，请检查雨课堂浏览器');
   }
+  context(classroomId) {
+    return this.courseContexts.get(Number(classroomId)) || {universityId:this.platform==='school'?2598:0,platformId:3};
+  }
   async api(route, classroomId) {
-    if (!route.startsWith('/') || route.startsWith('//') || !/^\/(mooc-api|c27|video-log)\//.test(route)) throw new Error('无效的课程请求');
+    if (!route.startsWith('/') || route.startsWith('//') || !(/^\/(mooc-api|c27|video-log)\//.test(route)||/^\/v2\/api\/web\/(courses\/list(?:\?|$)|classrooms\/\d+(?:\?|$))/.test(route))) throw new Error('无效的课程请求');
     const origin = PLATFORMS[validatePlatform(this.platform)].origin;
-    return this.evaluate(this.dataPage, `(${async function (route, classroomId, origin) {
+    const context=this.context(classroomId),xtbz=this.platform==='official'?'ykt':'cloud';
+    return this.evaluate(this.dataPage, `(${async function (route, classroomId, origin, context, xtbz) {
       if (location.origin !== origin) throw new Error('请在所选版本的雨课堂页完成登录，然后重新连接');
-      const headers = { 'xtbz': 'cloud', 'university-id': '2598', 'uv-id': '2598', 'platform-id': '3', 'terminal-type': 'web', 'x-client': 'web' };
+      const label=xtbz==='ykt'?'雨课堂版':'校园版';
+      const headers = { 'xtbz':xtbz, 'university-id':String(context.universityId), 'uv-id':String(context.universityId), 'platform-id':String(context.platformId), 'terminal-type':'web', 'x-client':'web', 'Xt-Agent':'web' };
       if (classroomId) headers['classroom-id'] = String(classroomId);
       const response = await fetch(route, { method: 'GET', credentials: 'same-origin', headers, signal: AbortSignal.timeout(15000), redirect: 'error' });
-      if (!response.ok) throw new Error(response.status === 401 || response.status === 403 ? '请在雨课堂浏览器中登录' : '课程请求失败：' + response.status);
-      const json = await response.json();
-      if (json.success === false || (json.errcode && json.errcode !== 0)) throw new Error(json.msg || json.errmsg || '读取课程失败，请检查登录');
-      return json.data || json;
-    }.toString()})(${JSON.stringify(route)},${JSON.stringify(classroomId || null)},${JSON.stringify(origin)})`);
+      if (!response.ok) throw new Error(`${label}请求失败（HTTP ${response.status}）：${response.status===401?'请在同一 Chrome 配置中登录后重新连接':response.status===403?'当前账号没有此课程访问权限':route}`);
+      let json;
+      try{json=await response.json();}catch{throw new Error(`${label}接口未返回课程数据，请检查是否停留在登录页：${route}`);}
+      if (json.success === false || (json.errcode!==undefined && Number(json.errcode)!==0)) throw new Error(`${label}接口错误${json.errcode!==undefined?'（'+json.errcode+'）':''}：${json.msg||json.errmsg||'请检查账号登录或课程权限'}`);
+      return json.data ?? json;
+    }.toString()})(${JSON.stringify(route)},${JSON.stringify(classroomId || null)},${JSON.stringify(origin)},${JSON.stringify(context)},${JSON.stringify(xtbz)})`);
   }
   async courses() {
+    if(this.platform==='official'){
+      const rows=officialCourseRows(await this.api(OFFICIAL_CATALOG));
+      for(const row of rows)this.courseContexts.set(row.classroom_id,{universityId:row.university_id,platformId:row.platform_id});
+      return rows;
+    }
     const data = await this.api('/mooc-api/v1/lms/user/user-courses/?status=1&page=1&no_page=1&no_term=true&uv_id=2598');
     if (!Array.isArray(data.product_list) || data.count !== data.product_list.length) throw new Error('课程列表返回不完整，请重新登录或刷新');
+    for(const row of data.product_list)this.courseContexts.set(Number(row.classroom_id),{universityId:Number(row.university_id)||2598,platformId:Number(row.platform_id)||3});
     return data.product_list;
   }
+  async resolveCourse(course) {
+    this.courseContexts.set(course.id,{universityId:course.universityId??(this.platform==='school'?2598:0),platformId:course.platformId||3});
+    if(this.platform!=='official')return course;
+    if(!this.courseDetails.has(course.id)){
+      const request=this.api(`/v2/api/web/classrooms/${course.id}?role=5`,course.id)
+        .then(data=>officialCourseDetails(course,data)).catch(error=>{this.courseDetails.delete(course.id);throw error;});
+      this.courseDetails.set(course.id,request);
+    }
+    const fresh={...course,...await this.courseDetails.get(course.id)};
+    this.courseContexts.set(course.id,{universityId:fresh.universityId,platformId:fresh.platformId});
+    return fresh;
+  }
   async courseData(course, detailed = false) {
+    course=await this.resolveCourse(course);
+    if(course.lmsAvailable===false)return {stats:{study_progress:0,unit_progress:{completed:0,total:0},unfinished:{total:0}},todos:[],chapters:null,metadata:course};
+    if(!Number.isSafeInteger(course.skuId)||course.skuId<=0)throw new Error('课程缺少线上学习单元标识，请刷新课程详情');
+    const context=this.context(course.id);
     const prefix = `/c27/online_courseware/course/classroom/${course.id}/${course.skuId}`;
     const [stats, todos] = await Promise.all([
-      this.api(`${prefix}/study_stat/?term=latest&uv_id=2598`, course.id),
-      this.api(`${prefix}/todo_list/?client_type=web&term=latest&uv_id=2598`, course.id),
+      this.api(`${prefix}/study_stat/?term=latest&uv_id=${context.universityId}`, course.id),
+      this.api(`${prefix}/todo_list/?client_type=web&term=latest&uv_id=${context.universityId}`, course.id),
     ]);
-    if (!Array.isArray(todos.result) || todos.count.total !== todos.result.length) throw new Error('待办列表返回不完整');
+    if (!Array.isArray(todos?.result) || Number(todos?.count?.total) !== todos.result.length) throw new Error('待办列表返回不完整，请重试课程同步');
     let chapters = null;
     if (detailed) chapters = await this.api(`/c27/online_courseware/schedule/course/progress/?classroom_id=${course.id}`, course.id);
-    return { stats, todos: todos.result, chapters };
+    return { stats, todos: todos.result, chapters, metadata:course };
   }
   async progress(course, task) {
+    course=await this.resolveCourse(course);
     if (!this.studentIds.has(course.id)) {
       const leaf = await this.api(`/mooc-api/v1/lms/learn/leaf_info/${course.id}/${task.leafId}/`,course.id);
       if (!leaf.user_id) throw new Error('未能读取当前学生的视频身份，请检查登录');

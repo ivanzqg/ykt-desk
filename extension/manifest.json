@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "雨课堂学习台",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "查看课程、待办与视频进度，选择校园版或雨课堂版，管理最多16个视频的倍速与静音播放。",
   "minimum_chrome_version": "118",
   "permissions": ["debugger", "storage", "tabs"],

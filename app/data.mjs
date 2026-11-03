@@ -1,10 +1,11 @@
 export function mapCourse(c) {
-  return { id:Number(c.classroom_id), courseId:Number(c.course_id), skuId:Number(c.sku_id), sign:c.course_sign, name:c.course_name, classroomName:c.classroom_name, term:c.classroom_term, auditor:c.role === 6, progress:0, units:{completed:0,total:0}, tasks:[], lastSync:null, error:null };
+  return { id:Number(c.classroom_id), courseId:Number(c.course_id), skuId:c.sku_id?Number(c.sku_id):null, universityId:Number(c.university_id??2598), platformId:Number(c.platform_id)||3, source:c.source||'school', sign:c.course_sign, name:c.course_name, classroomName:c.classroom_name, term:c.classroom_term, auditor:Number(c.role) === 6, progress:0, units:{completed:0,total:0}, tasks:[], lastSync:null, error:null };
 }
 export function mapTask(item, courseId) {
   return { id:`${courseId}:${item.leaf_id}`, courseId:Number(courseId), leafId:Number(item.leaf_id), name:item.name, type:Number(item.type ?? item.leaf_type), deadline:item.score_deadline || null, deadlineTs:item.score_deadline_ts || null, expired:!!item.is_expired, score:!!item.is_score, url:item.link_url || '', status:'pending', progress:Number(item.progress || 0), chapterId:item.chapter_id || null, section:null };
 }
-export function mergeCourse(course, { stats, todos, chapters }) {
+export function mergeCourse(course, { stats, todos, chapters, metadata }) {
+  if(metadata)course={...course,...metadata};
   const pending = todos.map(item => mapTask(item, course.id));
   const byId = new Map(pending.map(item => [item.id,item]));
   for (const chapter of chapters?.course_progress || []) {
