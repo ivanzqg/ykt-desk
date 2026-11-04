@@ -4,7 +4,7 @@ import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {createHash} from 'node:crypto';
 import path from 'node:path';
-import {readReleaseAssets,validateReleaseTag} from '../../scripts/release-assets.mjs';
+import {readReleaseAssets,validateReleaseTag,releaseAssetNames} from '../../scripts/release-assets.mjs';
 
 async function fixture(t) {
   const directory=await mkdtemp(path.join(tmpdir(),'ykt-release-'));
@@ -28,4 +28,9 @@ test('corrupt or unintended release files fail before publication',async t=>{
   await assert.rejects(readReleaseAssets(f),/校验和/);
   await writeFile(path.join(f.directory,'personal-cache.json'),'{}');
   await assert.rejects(readReleaseAssets(f),/4个发布文件/);
+});
+test('release instruction uploads use ASCII and recognize already-published GitHub sanitized names',()=>{
+  assert.equal(releaseAssetNames('安装说明.md')[0],'INSTALL.md');
+  assert.ok(releaseAssetNames('安装说明.md').includes('default.md'));
+  assert.deepEqual(releaseAssetNames('plugin.zip'),['plugin.zip']);
 });

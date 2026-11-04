@@ -5,6 +5,10 @@ import path from 'node:path';
 export function validateReleaseTag(tag,version) {
   if(tag!==`v${version}`)throw new Error(`Release 标签必须与 package.json 版本一致：应为 v${version}，实际为 ${tag}`);
 }
+export function releaseAssetNames(name) {
+  // GitHub sanitizes non-ASCII upload names; use ASCII for new release assets.
+  return name==='安装说明.md' ? ['INSTALL.md','default.md','安装说明.md'] : [name];
+}
 
 export async function readReleaseAssets({directory,tag,version,commit}) {
   validateReleaseTag(tag,version);

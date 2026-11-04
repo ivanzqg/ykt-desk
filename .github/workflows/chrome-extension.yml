@@ -73,7 +73,7 @@ jobs:
             const path = require('node:path');
             const { pathToFileURL } = require('node:url');
             const root = process.env.GITHUB_WORKSPACE;
-            const { readReleaseAssets } = await import(pathToFileURL(path.join(root, 'scripts/release-assets.mjs')).href);
+            const { readReleaseAssets, releaseAssetNames } = await import(pathToFileURL(path.join(root, 'scripts/release-assets.mjs')).href);
             const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
             const tag = process.env.GITHUB_REF_NAME;
             const { assets, filename, sha256 } = await readReleaseAssets({
@@ -104,17 +104,18 @@ jobs:
             if (release.target_commitish !== context.sha) throw new Error('已有Release指向不同提交，拒绝替换');
             if (!release.draft) {
               const zip = release.assets.find(asset => asset.name === filename);
-              if (!assets.every(asset => release.assets.some(existing => existing.name === asset.name && existing.size > 0)) || zip?.digest !== `sha256:${sha256}`) {
+              if (!assets.every(asset => release.assets.some(existing => releaseAssetNames(asset.name).includes(existing.name) && existing.size > 0)) || zip?.digest !== `sha256:${sha256}`) {
                 throw new Error('已有公开Release附件与本次构建不一致，拒绝覆盖');
               }
               core.notice(`Release已发布且校验一致：${release.html_url}`);
               return;
             }
             for (const asset of assets) {
-              const previous = release.assets.find(existing => existing.name === asset.name);
+              const names = releaseAssetNames(asset.name);
+              const previous = release.assets.find(existing => names.includes(existing.name));
               if (previous) await github.rest.repos.deleteReleaseAsset({ ...repo, asset_id: previous.id });
               await github.rest.repos.uploadReleaseAsset({
-                ...repo, release_id: release.id, name: asset.name, data: asset.data,
+                ...repo, release_id: release.id, name: names[0], data: asset.data,
                 headers: { 'content-type': 'application/octet-stream', 'content-length': asset.data.length },
               });
             }

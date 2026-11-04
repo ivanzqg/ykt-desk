@@ -49,7 +49,7 @@ Chrome 必须保持运行，电脑必须保持唤醒。关闭 Chrome、系统睡
 - `package-extension`：`npm ci`、`npm run build:extension`、`npm run test:extension`，然后上传artifact。
 - `release`：推送与 `package.json` 版本一致的标签（例如 `v1.2.1`）时，在前面检查成功后，将ZIP、SHA-256、构建信息和安装说明上传到Release，并公开下载。普通分支构建不会发布Release。
 
-Actions artifacts保留30天，Release附件长期保留。发布只收集当前版本的4个指定文件，并核对版本、提交、文件长度及SHA-256。Release上传全部附件后才从草稿公开，失败时可重跑同一个标签的workflow。旧EXE、课程缓存、浏览器配置和网络捕获不会上传。
+Actions artifacts保留30天，Release附件长期保留。发布只收集当前版本的4个指定文件，并核对版本、提交、文件长度及SHA-256。Release上的独立安装说明统一使用 `INSTALL.md`；首次发布的v1.2.1由GitHub命名为 `default.md`，内容同安装说明。Release上传全部附件后才从草稿公开，失败时可重跑同一个标签的workflow。旧EXE、课程缓存、浏览器配置和网络捕获不会上传。
 
 本地构建与校验：
 
