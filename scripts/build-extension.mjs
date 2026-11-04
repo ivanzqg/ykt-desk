@@ -5,12 +5,14 @@ import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { EXTENSION_FILES, validateManifest } from './extension-package.mjs';
+import { validateReleaseTag } from './release-assets.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const output = path.join(root, 'dist', 'chrome-extension');
 const unpacked = path.join(output, 'unpacked');
 await mkdir(unpacked, {recursive:true});
 const pkg = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+if(process.env.GITHUB_REF_TYPE==='tag')validateReleaseTag(process.env.GITHUB_REF_NAME,pkg.version);
 const manifest = JSON.parse(await readFile(path.join(root, 'extension', 'manifest.json'), 'utf8'));
 manifest.version = pkg.version;
 validateManifest(manifest);

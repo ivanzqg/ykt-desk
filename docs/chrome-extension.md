@@ -4,7 +4,7 @@ GitHub Actions 的发布产物为 Manifest V3 Chrome 插件 ZIP。插件包含�
 
 ## 安装
 
-1. 在 [GitHub Actions](https://github.com/ivanzqg/ykt-desk/actions/workflows/chrome-extension.yml) 打开成功的运行，下载 `yuketang-chrome-*` artifact，找到 `YuketangStudyDesk-1.2.1-chrome.zip`。
+1. 从 [GitHub Releases](https://github.com/ivanzqg/ykt-desk/releases) 下载 `YuketangStudyDesk-1.2.1-chrome.zip`。开发构建也可在 [GitHub Actions](https://github.com/ivanzqg/ykt-desk/actions/workflows/chrome-extension.yml) 的成功运行下载 `yuketang-chrome-*` artifact。
 2. 将插件 ZIP 解压到固定目录。目录中必须直接包含 `manifest.json`，不要选择 artifacts 外层目录。
 3. 使用 Chrome 118 或更高版本，打开 `chrome://extensions`，启用右上角“开发者模式”。
 4. 点击“加载已解压的扩展程序”，选择包含 `manifest.json` 的目录。
@@ -43,12 +43,13 @@ Chrome 必须保持运行，电脑必须保持唤醒。关闭 Chrome、系统睡
 
 ## GitHub Actions
 
-`.github/workflows/chrome-extension.yml` 在推送至master/main、Pull Request及手动运行时执行，两阶段均使用Ubuntu和Node.js 24.22.2：
+`.github/workflows/chrome-extension.yml` 在推送至master/main、v*版本标签、Pull Request及手动运行时执行。测试和打包使用Ubuntu和Node.js 24.22.2：
 
 - `verify`：`npm ci`、语法检查、单元测试。
 - `package-extension`：`npm ci`、`npm run build:extension`、`npm run test:extension`，然后上传artifact。
+- `release`：推送与 `package.json` 版本一致的标签（例如 `v1.2.1`）时，在前面检查成功后，将ZIP、SHA-256、构建信息和安装说明上传到Release，并公开下载。普通分支构建不会发布Release。
 
-发布 artifacts 包含插件 ZIP、SHA-256、构建信息和安装说明，保留 30 天。只收集 `dist/chrome-extension/` 的指定文件，不上传旧 EXE、课程缓存、浏览器配置和网络捕获。
+Actions artifacts保留30天，Release附件长期保留。发布只收集当前版本的4个指定文件，并核对版本、提交、文件长度及SHA-256。Release上传全部附件后才从草稿公开，失败时可重跑同一个标签的workflow。旧EXE、课程缓存、浏览器配置和网络捕获不会上传。
 
 本地构建与校验：
 

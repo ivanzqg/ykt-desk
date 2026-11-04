@@ -3,6 +3,7 @@ name: Chrome extension
 on:
   push:
     branches: [master, main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
@@ -11,7 +12,7 @@ permissions:
 
 concurrency:
   group: chrome-extension-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 jobs:
   verify:
@@ -51,3 +52,71 @@ jobs:
             dist/chrome-extension/安装说明.md
           if-no-files-found: error
           retention-days: 30
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: package-extension
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: yuketang-chrome-${{ github.run_number }}
+          path: release-assets
+      - name: Publish validated extension to GitHub Release
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('node:fs/promises');
+            const path = require('node:path');
+            const { pathToFileURL } = require('node:url');
+            const root = process.env.GITHUB_WORKSPACE;
+            const { readReleaseAssets } = await import(pathToFileURL(path.join(root, 'scripts/release-assets.mjs')).href);
+            const pkg = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8'));
+            const tag = process.env.GITHUB_REF_NAME;
+            const { assets, filename, sha256 } = await readReleaseAssets({
+              directory: path.join(root, 'release-assets'), tag,
+              version: pkg.version, commit: context.sha,
+            });
+            const repo = context.repo;
+            let release;
+            try {
+              release = (await github.rest.repos.getReleaseByTag({ ...repo, tag })).data;
+            } catch (error) {
+              if (error.status !== 404) throw error;
+              release = (await github.rest.repos.createRelease({
+                ...repo, tag_name: tag, target_commitish: context.sha,
+                name: `雨课堂学习台 ${tag}`, draft: true, prerelease: false,
+                body: [
+                  `下载 **${filename}**，解压后在 Chrome 的扩展管理页面加载。`,
+                  '',
+                  '- 支持校园版与雨课堂版、多选排队、最多16个视频并发和静音播放。',
+                  '- 附件包含插件ZIP、SHA-256、构建信息和安装说明。',
+                  '',
+                  `[安装和升级说明](https://github.com/${repo.owner}/${repo.repo}/blob/${tag}/docs/chrome-extension.md)`,
+                  '',
+                  '观看进度以雨课堂服务器返回为准；实际账号同步与长期播放仍需用有效登录验证。',
+                ].join('\n'),
+              })).data;
+            }
+            if (release.target_commitish !== context.sha) throw new Error('已有Release指向不同提交，拒绝替换');
+            if (!release.draft) {
+              const zip = release.assets.find(asset => asset.name === filename);
+              if (!assets.every(asset => release.assets.some(existing => existing.name === asset.name && existing.size > 0)) || zip?.digest !== `sha256:${sha256}`) {
+                throw new Error('已有公开Release附件与本次构建不一致，拒绝覆盖');
+              }
+              core.notice(`Release已发布且校验一致：${release.html_url}`);
+              return;
+            }
+            for (const asset of assets) {
+              const previous = release.assets.find(existing => existing.name === asset.name);
+              if (previous) await github.rest.repos.deleteReleaseAsset({ ...repo, asset_id: previous.id });
+              await github.rest.repos.uploadReleaseAsset({
+                ...repo, release_id: release.id, name: asset.name, data: asset.data,
+                headers: { 'content-type': 'application/octet-stream', 'content-length': asset.data.length },
+              });
+            }
+            const published = (await github.rest.repos.updateRelease({ ...repo, release_id: release.id, draft: false })).data;
+            core.notice(`已发布Release：${published.html_url}`);

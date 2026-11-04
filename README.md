@@ -6,7 +6,7 @@
 
 ## Chrome 插件安装与使用
 
-1. 打开 [GitHub Actions](https://github.com/ivanzqg/ykt-desk/actions/workflows/chrome-extension.yml)，选择成功的运行，下载 `yuketang-chrome-*` artifact，解压其中的 `YuketangStudyDesk-1.2.1-chrome.zip`。
+1. 在 [GitHub Releases](https://github.com/ivanzqg/ykt-desk/releases) 下载 `YuketangStudyDesk-1.2.1-chrome.zip`。也可从 [GitHub Actions](https://github.com/ivanzqg/ykt-desk/actions/workflows/chrome-extension.yml) 的成功运行下载 `yuketang-chrome-*` artifact，解压其中的插件ZIP。
 2. 使用 Chrome 118+，打开 `chrome://extensions`，开启“开发者模式”，点击“加载已解压的扩展程序”，选择包含 `manifest.json` 的目录。
 3. 点击工具栏的“雨课堂学习台”打开管理页面，通过“页面版本”选择校园版或雨课堂版，登录后点击“连接浏览器”。登录、连接页和课程接口均使用所选域名；切换版本会断开旧连接，需重新连接、同步。
 4. 勾选多个视频，或用“多选全部课程视频”选择当前学期筛选范围中的可播放任务，设置倍速、1–16并发及“视频静音”，点击“加入队列并开始”。超过并发上限的任务会排队，前面的任务完成或跳过后自动补位。
@@ -75,11 +75,21 @@ npm run check
 
 ## GitHub Actions 与插件打包
 
-`.github/workflows/chrome-extension.yml` 在推送至 `master` / `main`、Pull Request 或手动运行时执行，两阶段均使用 Ubuntu 和 Node.js 24.22.2：
+`.github/workflows/chrome-extension.yml` 在推送至 `master` / `main`、`v*`版本标签、Pull Request 或手动运行时执行。测试与打包使用Ubuntu和Node.js 24.22.2：
 
 - `verify`：安装锁定的开发依赖，运行语法检查和单元测试。
 - `package-extension`：等待校验成功后生成插件ZIP，并验证Manifest、权限、网页资源、JavaScript、ZIP文件清单和SHA-256。
 - 上传 `yuketang-chrome-*` artifact，包括插件ZIP、SHA-256、构建信息和安装说明，保留30天。构建信息记录GitHub提交和对应Actions运行地址。
+- `release`：只在推送版本标签时运行；等待测试、打包和包校验完成后，将4个发布文件上传至同名Release。先创建草稿，上传全部附件后公开；已公开且内容一致的Release在重跑时保留。
+
+发布版本时，标签必须和 `package.json` 一致，例如当前版本 `1.2.1`：
+
+```powershell
+git tag -a v1.2.1 -m "Release v1.2.1"
+git push origin v1.2.1
+```
+
+版本不匹配时打包失败，不会发布。Release附件长期保留，不受Actions artifact的30天期限限制。Release任务使用仓库自带的 `GITHUB_TOKEN`，只有该任务获得 `contents: write`，无需配置额外密钥。分支推送和Pull Request继续仅测试、打包。
 
 无需自建Windows Runner。CI发布路径限定为 `dist/chrome-extension/` 的指定文件，旧EXE不会被收集。旧 `.gitlab-ci.yml` 保留用于GitLab兼容，但主远程仓库已迁至GitHub。
 
